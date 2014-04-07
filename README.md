@@ -12,7 +12,7 @@ add libcurl.dylib nacl/randombytes.o nacl/libnacl.a
 You might have to install nacl and generate all the nacl files, only a few are actually used (as of now)
 
 Change the following line in libwebsocketsglue.h to a path on your computer
-#define NXTPROTOCOL_HTMLFILE "/Users/jl777/NXTprotocol.html"
+NXTPROTOCOL_HTMLFILE "/Users/jl777/NXTprotocol.html"
 The NXTprotocol.html file is what is displayed when http://127.0.0.1:7777/ is accessed. It is currently very primitive
 but shows how to interface to the websockets.
 
