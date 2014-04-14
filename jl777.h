@@ -18,26 +18,38 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
-#include <sys/wait.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <sys/time.h>
 #include <pthread.h>
 #include <memory.h>
 #include <zlib.h>
 #include "nacl/crypto_box.h"
 #include "nacl/randombytes.h"
+void *jl777malloc(size_t allocsize) { void *ptr = malloc(allocsize); if ( ptr == 0 ) { printf("malloc(%ld) failed\n",allocsize); while ( 1 ) sleep(60); } return(ptr); }
+void *jl777calloc(size_t num,size_t allocsize) { void *ptr = calloc(num,allocsize); if ( ptr == 0 ) { printf("calloc(%ld,%ld) failed\n",num,allocsize); while ( 1 ) sleep(60); } return(ptr); }
+#define malloc jl777malloc
+#define calloc jl777calloc
+   
 #include "guardians.h"
-#include "cJSON.h"
-#include "jl777str.h"
-#include "cJSON.c"
-#include "queue.c"
-#include "jsoncodec.h"
-#include "bitcoind_RPC.c"
+#include "utils/cJSON.h"
+#include "utils/jl777str.h"
+#include "utils/cJSON.c"
+#include "utils/bitcoind_RPC.c"
+#include "utils/jsoncodec.h"
+
+#define BTC_COINASSET "10235881003283394223"
+#define LTC_COINASSET "18237314836568240804"
+#define CGB_COINASSET "17262323417894903558"
+#define DOGE_COINASSET "9035587034804564125"
+#define DRK_COINASSET "13015637232441376361"
+#define NODECOIN "9096665501521699628"
+#define USD_COINASSET "4562283093369359331"
+#define CNY_COINASSET "13983943517283353302"
 
 #define NXTISSUERACCT "18232225178877143084"
 #define GENESISACCT "1739068987193023818"
 #define NODECOIN_SIG 0x63968736
-#define NODECOIN "5504393446230775388"
 #define POOLSERVER "209.126.73.160"
 
 #define USD "3759130218572630531"
@@ -53,6 +65,7 @@
 #define NXTSERVER "http://127.0.0.1:7876/nxt?requestType"
 #else
 #define NXTSERVER "http://127.0.0.1:6876/nxt?requestType"
+//#define NXTSERVER "http://node10.mynxtcoin.org:6876/nxt?requestType"
 #endif
 #endif
 
@@ -68,6 +81,25 @@
 #define MAX_NXTADDR_LEN MAX_NXT_STRLEN
 #define POLL_SECONDS 10
 #define NXT_ASSETLIST_INCR 100
+
+typedef struct queue
+{
+	void **buffer;
+    int32_t capacity;
+	int32_t size;
+	int32_t in;
+	int32_t out;
+	pthread_mutex_t mutex;
+	pthread_cond_t cond_full;
+	pthread_cond_t cond_empty;
+} queue_t;
+
+struct pingpong_queue
+{
+    char *name;
+    queue_t pingpong[2],*destqueue,*errorqueue;
+    int32_t (*action)();
+};
 
 union NXTtype { uint64_t nxt64bits; uint32_t uval; int32_t val; int64_t lval; double dval; char *str; cJSON *json; };
 
@@ -146,12 +178,14 @@ struct NXT_protocol *NXThandlers[1000]; int Num_NXThandlers;
 #define MIN(x,y) (((x)<=(y)) ? (x) : (y))
 #define MAX(x,y) (((x)>=(y)) ? (x) : (y))
 
-//char *bitcoind_RPC(char *debugstr,int32_t numretries,char *url,char *userpass,char *command,char *args);
+char *bitcoind_RPC(char *debugstr,int32_t numretries,char *url,char *userpass,char *command,char *args);
 #define issue_curl(cmdstr) bitcoind_RPC("NXT",3,cmdstr,0,0,0)
+#define fetch_URL(cmdstr) bitcoind_RPC("fetch",0,cmdstr,0,0,0)
 
-#include "jl777hash.h"
-#include "NXTutils.h"
-#include "NXTsock.h"
+#include "utils/jl777hash.h"
+#include "utils/NXTutils.h"
+#include "utils/NXTsock.h"
 #include "NXTprotocol.h"
+#include "InstantDEX.h"
 
 #endif
