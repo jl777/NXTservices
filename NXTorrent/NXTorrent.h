@@ -9,6 +9,9 @@
 
 
 #define NXTORRENT_SIG 0x48573945
+#define NXTORRENT_CANCELADDR "1234567890123456789"
+#define NXTORRENT_LISTINGADDR NXTORRENT_CANCELADDR
+#define NXTORRENT_MAXLISTINGS_DISP 100
 
 struct NXTorrent_info
 {
@@ -17,12 +20,14 @@ struct NXTorrent_info
 };
 struct NXTorrent_info *Global_NXTorrent;
 
+// AM funcids
 #define NXTORRENT_LIST 'L'
 #define NXTORRENT_FEEDBACK 'F'
 #define NXTORRENT_CANCEL 'X'
 #define NXTORRENT_MAKEOFFER 'O'
 #define NXTORRENT_ACCEPT 'A'
 
+// status values
 #define NXTORRENT_INACTIVE 0
 #define NXTORRENT_ACTIVE 1
 #define NXTORRENT_CANCELLED 2
@@ -31,18 +36,32 @@ struct NXTorrent_info *Global_NXTorrent;
 #define NXTORRENT_INTRANSIT 5
 #define NXTORRENT_DISPUTED 6
 #define NXTORRENT_COMPLETED 7
-#define NXTORRENT_BUYERFLAG 0x1000
-#define NXTORRENT_SELLERFLAG 0x2000
+#define NUM_NXTORRENT_STATUS 8
 
 #define NXTORRENT_NOLISTING "{\"error\":\"no listingid\"}"
 
+struct _NXTorrent_feedback { int32_t rating; char *about; };
+struct NXTorrent_feedback { struct _NXTorrent_feedback seller,buyer; };
 
 struct NXTorrent_listing
 {
-    uint64_t modified,seller64bits,buyer64bits,listingAMbits,price;
+    uint64_t modified,seller64bits,buyer64bits,listingAMbits,listing64bits,price;
     int32_t status,listedtime;
     char listingid[64],*jsontxt,*URI;
+    struct NXTorrent_feedback feedback;
 };
+
+char *get_URI_contents(char *URI)
+{
+    char *contents;
+    contents = fetch_URL(URI);
+    if ( contents == 0 )
+    {
+        
+    }
+    else printf("fetched(%s)\n",contents);
+    return(contents);
+}
 
 int32_t passes_filter(struct NXTorrent_listing *lp,cJSON *filter)
 {
@@ -54,6 +73,7 @@ int32_t passes_filter(struct NXTorrent_listing *lp,cJSON *filter)
         for (i=0; i<n; i++)
         {
             obj = cJSON_GetArrayItem(filter,i);
+            // need to define and implement a way to specify filtering
         }
     }
     return(1);
@@ -61,7 +81,7 @@ int32_t passes_filter(struct NXTorrent_listing *lp,cJSON *filter)
 
 char *NXTorrent_status_str(int32_t status)
 {
-    switch ( (status&7) )
+    switch ( (status & 7) )
     {
         case 0: return("inactive listing"); break;
         case NXTORRENT_ACTIVE: return("active listing"); break;
@@ -73,6 +93,32 @@ char *NXTorrent_status_str(int32_t status)
         case NXTORRENT_COMPLETED: return("completed listing"); break;
     }
     return("invalid listingid");
+}
+
+int32_t conv_status_str(char *str)
+{
+    int32_t i;
+    for (i=0; i<NUM_NXTORRENT_STATUS; i++)
+    {
+        if ( strcmp(str,NXTorrent_status_str(i)) == 0 )
+            return(i);
+    }
+    return(-1);
+}
+
+void purge_NXTorrent_listing(struct NXTorrent_listing *lp,int32_t freeflag)
+{
+    if ( lp->jsontxt != 0 )
+        free(lp->jsontxt);
+    if ( lp->URI != 0 )
+        free(lp->URI);
+    if ( lp->feedback.buyer.about != 0 )
+        free(lp->feedback.buyer.about);
+    if ( lp->feedback.seller.about != 0 )
+        free(lp->feedback.seller.about);
+    memset(lp,0,sizeof(*lp));
+    if ( freeflag != 0 )
+        free(lp);
 }
 
 char *standard_retstr(char *retstr)
@@ -90,13 +136,14 @@ char *standard_retstr(char *retstr)
     return(retstr);
 }
 
-char *AM_NXTorrent(int32_t func,int32_t timestamp,char *nxtaddr,char *jsontxt)
+char *AM_NXTorrent(int32_t func,int32_t rating,char *destaddr,uint64_t listingbits,char *jsontxt)
 {
     char AM[4096],*retstr;
     struct json_AM *ap = (struct json_AM *)AM;
-    printf("func.(%c) AM_NXTorrent(%s)\n",func,jsontxt);
-    set_json_AM(ap,NXTORRENT_SIG,func,nxtaddr,timestamp,jsontxt,1);
-    retstr = submit_AM(&ap->H,0);
+    printf("listing.%s func.(%c) AM_NXTorrent(%s) -> NXT.(%s) rating.%d\n",nxt64str(listingbits),func,jsontxt,destaddr,rating);
+    set_json_AM(ap,NXTORRENT_SIG,func,"0",rating,jsontxt,1);
+    ap->H.nxt64bits = listingbits;
+    retstr = submit_AM(destaddr,&ap->H,0);
     return(retstr);
 }
 
@@ -118,9 +165,87 @@ int32_t get_listing_status(char *listingid)
     return(-1);
 }
 
-cJSON *gen_listing_json(struct NXTorrent_listing *lp)
+void init_NXTorrent_listing(struct NXTorrent_listing *lp,uint64_t price,char *seller,char *listingid,char *jsontxt,char *URI)
 {
-    cJSON *json;
+    printf("create new listing\n");
+    lp->seller64bits = calc_nxt64bits(seller);
+    strcpy(lp->listingid,listingid);
+    lp->listing64bits = calc_nxt64bits(listingid);
+    lp->listedtime = Global_mp->timestamp;
+    lp->status = NXTORRENT_ACTIVE;
+    lp->jsontxt = clonestr(jsontxt);
+    lp->price = price;
+    if ( URI[0] != 0 )
+        lp->URI = clonestr(URI);
+}
+
+int32_t cmp_NXTorrent_listings(struct NXTorrent_listing *ref,struct NXTorrent_listing *lp)
+{
+    char refbuf[4096],buf[4096];
+    if ( ref->seller64bits != lp->seller64bits )
+        return(-1);
+    if ( ref->buyer64bits != lp->buyer64bits )
+        return(-2);
+    if ( ref->listing64bits != lp->listing64bits )
+        return(-3);
+    if ( ref->listingAMbits != lp->listingAMbits )
+        return(-4);
+    if ( ref->listedtime != lp->listedtime )
+        return(-5);
+    if ( ref->price != lp->price )
+        return(-6);
+    if ( ref->status != lp->status )
+        return(-7);
+    //safecopy(refbuf,ref->jsontxt,sizeof(refbuf)); safecopy(buf,lp->jsontxt,sizeof(buf));
+    //if ( strcmp(refbuf,buf) != 0 )
+    //    return(-8);
+    safecopy(refbuf,ref->URI,sizeof(refbuf)); safecopy(buf,lp->URI,sizeof(buf));
+    if ( strcmp(refbuf,buf) != 0 )
+        return(-9);
+    safecopy(refbuf,ref->listingid,sizeof(refbuf)); safecopy(buf,lp->listingid,sizeof(buf));
+    if ( strcmp(refbuf,buf) != 0 )
+        return(-10);
+    return(0);
+}
+
+cJSON *_gen_NXTorrent_feedback_json(struct _NXTorrent_feedback *ptr)
+{
+    cJSON *json = 0;
+    if ( ptr->rating != 0 || ptr->about != 0 )
+    {
+        json = cJSON_CreateObject();
+        cJSON_AddItemToObject(json,"rating",cJSON_CreateNumber(ptr->rating));
+        cJSON_AddItemToObject(json,"about",cJSON_CreateString(ptr->about));
+    }
+    return(json);
+}
+
+cJSON *gen_NXTorrent_feedback_json(struct NXTorrent_feedback *ptr)
+{
+    cJSON *buyer,*seller,*array = 0;
+    buyer = _gen_NXTorrent_feedback_json(&ptr->buyer);
+    seller = _gen_NXTorrent_feedback_json(&ptr->seller);
+    if ( buyer != 0 || seller != 0 )
+    {
+        array = cJSON_CreateArray();
+        cJSON_AddItemToArray(array,seller);
+        cJSON_AddItemToArray(array,buyer);
+    }
+    return(array);
+}
+
+cJSON *gen_URI_json(char *URI)
+{
+    char *contents;
+    cJSON *json = 0;
+    if ( (contents= get_URI_contents(URI)) != 0 )
+        json = cJSON_CreateString(contents);
+    return(json);
+}
+
+cJSON *gen_listing_json(struct NXTorrent_listing *lp,int32_t URIcontents)
+{
+    cJSON *json,*obj;
     char seller[64],buyer[64],numstr[64];
     json = cJSON_CreateObject();    
     expand_nxt64bits(seller,lp->seller64bits);
@@ -134,7 +259,11 @@ cJSON *gen_listing_json(struct NXTorrent_listing *lp)
     if ( buyer[0] != 0 )
         cJSON_AddItemToObject(json,"buyer",cJSON_CreateString(buyer));
     if ( lp->URI != 0 )
+    {
         cJSON_AddItemToObject(json,"URI",cJSON_CreateString(lp->URI));
+        if ( URIcontents != 0 && (obj= gen_URI_json(lp->URI)) != 0 )
+            cJSON_AddItemToObject(json,"URIcontents",obj);
+    }
     if ( lp->jsontxt != 0 )
         cJSON_AddItemToObject(json,"listing",cJSON_CreateString(lp->jsontxt));
     if ( lp->listingAMbits != 0 )
@@ -142,7 +271,107 @@ cJSON *gen_listing_json(struct NXTorrent_listing *lp)
         expand_nxt64bits(numstr,lp->listingAMbits);
         cJSON_AddItemToObject(json,"listingAMtxid",cJSON_CreateString(numstr));
     }
+    if ( (obj= gen_NXTorrent_feedback_json(&lp->feedback)) != 0 )
+        cJSON_AddItemToObject(json,"feedback",obj);
     return(json);
+}
+
+int32_t decode_NXTorrent_json(struct NXTorrent_listing *lp,cJSON *json)
+{
+    char seller[64],numstr[64],buyer[64],status[64],URI[64],listing[1024],listingAMtxid[64];
+    cJSON *obj;
+    memset(lp,0,sizeof(*lp));
+    if ( json != 0 )
+    {
+        lp->listedtime = (uint32_t)get_cJSON_int(json,"listedtime");
+        obj = cJSON_GetObjectItem(json,"seller"); copy_cJSON(seller,obj);
+        obj = cJSON_GetObjectItem(json,"listingid"); copy_cJSON(lp->listingid,obj);
+        obj = cJSON_GetObjectItem(json,"price"); copy_cJSON(numstr,obj);
+        obj = cJSON_GetObjectItem(json,"buyer"); copy_cJSON(buyer,obj);
+        obj = cJSON_GetObjectItem(json,"URI"); copy_cJSON(URI,obj);
+        obj = cJSON_GetObjectItem(json,"listing"); copy_cJSON(listing,obj);
+        obj = cJSON_GetObjectItem(json,"listingAMtxid"); copy_cJSON(listingAMtxid,obj);
+        obj = cJSON_GetObjectItem(json,"status"); copy_cJSON(status,obj);
+      
+        if ( numstr[0] != 0 )
+            lp->price = (uint64_t)(atof(numstr) * SATOSHIDEN);
+        if ( seller[0] != 0 )
+            lp->seller64bits = calc_nxt64bits(seller);
+        if ( lp->listingid[0] != 0 )
+            lp->listing64bits = calc_nxt64bits(lp->listingid);
+        if ( buyer[0] != 0 )
+            lp->buyer64bits = calc_nxt64bits(buyer);
+        if ( seller[0] != 0 )
+            lp->listingAMbits = calc_nxt64bits(listingAMtxid);
+        if ( URI[0] != 0 )
+            lp->URI = clonestr(URI);
+        if ( listing[0] != 0 )
+            lp->jsontxt = clonestr(listing);
+        lp->status = conv_status_str(status);
+        return(0);
+    }
+    return(-1);
+}
+
+void update_NXTorrent_state(struct NXTorrent_info *dp,int32_t funcid,int32_t rating,cJSON *argjson,uint64_t listingbits,char *sender,char *receiver)
+{
+    int32_t createdflag;
+    char listingid[64],buyer[64],seller[64];
+    uint64_t senderbits,receiverbits;
+    struct NXTorrent_listing L,*lp;
+    if ( listingbits == 0 )
+        return;
+    if ( funcid == NXTORRENT_LIST )
+    {
+        if ( decode_NXTorrent_json(&L,argjson) >= 0 )
+        {
+            lp = add_hashtable(&createdflag,&Global_NXTorrent->listings,L.listingid);
+            if ( createdflag != 0 )
+                *lp = L;
+        }
+    }
+    else
+    {
+        senderbits = calc_nxt64bits(sender);
+        receiverbits = calc_nxt64bits(receiver);
+        expand_nxt64bits(listingid,listingbits);
+        lp = add_hashtable(&createdflag,&Global_NXTorrent->listings,listingid);
+        switch ( funcid )
+        {
+            case NXTORRENT_CANCEL:
+                lp->status = NXTORRENT_CANCELLED;
+                break;
+            case NXTORRENT_MAKEOFFER:
+                lp->status = NXTORRENT_OFFERED;
+                lp->buyer64bits = calc_nxt64bits(sender);
+                break;
+            case NXTORRENT_ACCEPT:
+                lp->buyer64bits = calc_nxt64bits(receiver);
+                lp->status = NXTORRENT_ACCEPTED;
+                break;
+            case NXTORRENT_FEEDBACK:
+                expand_nxt64bits(buyer,lp->buyer64bits);
+                expand_nxt64bits(seller,lp->seller64bits);
+                if ( senderbits == lp->seller64bits && receiverbits == lp->buyer64bits )
+                {
+                    lp->feedback.buyer.rating = rating;
+                    if ( argjson != 0 )
+                        lp->feedback.buyer.about = cJSON_Print(argjson);
+
+                }
+                else if ( senderbits == lp->buyer64bits && receiverbits == lp->seller64bits )
+                {
+                    lp->feedback.seller.rating = rating;
+                    if ( argjson != 0 )
+                        lp->feedback.seller.about = cJSON_Print(argjson);
+                }
+                else
+                {
+                    printf("WARNING: unexpected feedback AM: sender.%s -> receiver.%s when seller.%s and buyer.%s\n",sender,receiver,seller,buyer);
+                }
+                break;
+        }
+    }
 }
 
 char *status_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
@@ -156,7 +385,7 @@ char *status_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
     {
         if ( (lp = get_listingid(listingid)) != 0 )
         {
-            json = gen_listing_json(lp);
+            json = gen_listing_json(lp,1);
             if ( json != 0 )
             {
                 retstr = cJSON_Print(json);
@@ -171,7 +400,7 @@ char *status_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
 
 char *cancel_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
 {
-    char NXTaddr[64],listingid[64],buf[512],*retstr = 0;
+    char NXTaddr[64],destaddr[64],listingid[64],buf[512],*retstr = 0;
     struct NXTorrent_listing *lp;
     copy_cJSON(NXTaddr,objs[0]);
     copy_cJSON(listingid,objs[1]);
@@ -183,7 +412,10 @@ char *cancel_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
             {
                 lp->status = NXTORRENT_CANCELLED;
                 sprintf(buf,"{\"cancelled\":\"%s\"}",listingid);
-                retstr = AM_NXTorrent(NXTORRENT_CANCEL,Global_mp->timestamp,NXTaddr,buf);
+                if ( lp->buyer64bits != 0 )
+                    expand_nxt64bits(destaddr,lp->buyer64bits);
+                else strcpy(destaddr,NXTORRENT_CANCELADDR);
+                retstr = AM_NXTorrent(NXTORRENT_CANCEL,0,destaddr,lp->listing64bits,buf);
                 retstr = standard_retstr(retstr);
             }
             else
@@ -216,9 +448,11 @@ char *listings_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
                 lp = all[i];
                 if ( passes_filter(lp,objs[1]) > 0 )
                 {
-                    printf("add %s\n",lp->listingid);
+                    printf("num.%d add %s\n",(int32_t)num,lp->listingid);
                     cJSON_AddItemToArray(array,cJSON_CreateString(lp->listingid));
                 }
+                if ( num >= NXTORRENT_MAXLISTINGS_DISP )
+                    break;
             }
             free(all);
             retstr = cJSON_Print(array);
@@ -231,9 +465,9 @@ char *listings_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
 
 char *list_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
 {
-    char token[NXT_TOKEN_LEN+1],numstr[128],hashvalstr[64],NXTaddr[64],URI[512],buf[4096],*str,*jsontxt,*retstr = 0;
-    struct NXTorrent_listing *lp;
-    int32_t createdflag,i,n;
+    char numstr[128],listingid[64],hashbuf[512],NXTaddr[64],URI[512],buf[4096],*str,*jsontxt,*retstr = 0;
+    struct NXTorrent_listing *lp,L;
+    int32_t cmpval,createdflag,i,n;
     uint64_t hashval,price = 0;
     cJSON *URIobj,*json,*item,*priceobj,*array = objs[1];
     copy_cJSON(NXTaddr,objs[0]);
@@ -258,36 +492,39 @@ char *list_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
         }
         copy_cJSON(buf,objs[1]);
         stripwhite(buf,strlen(buf));
-        jsontxt = clonestr(buf);
-        issue_generateToken(token,buf,Global_NXTorrent->NXTACCTSECRET);
-        token[NXT_TOKEN_LEN] = 0;
-        sprintf(buf,"%s%s",token,NXTaddr);
-        hashval = calc_decimalhash(buf);
-        expand_nxt64bits(hashvalstr,hashval);
-        lp = add_hashtable(&createdflag,&Global_NXTorrent->listings,hashvalstr);
+        jsontxt = buf;
+
+        sprintf(hashbuf,"%s%s",buf,NXTaddr);
+        hashval = calc_decimalhash(hashbuf);
+        expand_nxt64bits(listingid,hashval);
+        lp = add_hashtable(&createdflag,&Global_NXTorrent->listings,listingid);
         if ( createdflag != 0 )
         {
             if ( lp != 0 )
             {
-                printf("create new listing\n");
-                lp->seller64bits = calc_nxt64bits(NXTaddr);
-                lp->listedtime = Global_mp->timestamp;
-                lp->status = NXTORRENT_ACTIVE;
-                lp->jsontxt = jsontxt;
-                lp->price = price;
-                if ( URI[0] != 0 )
-                    lp->URI = clonestr(URI);
-                json = gen_listing_json(lp);
+                init_NXTorrent_listing(lp,price,NXTaddr,listingid,jsontxt,URI);
+                json = gen_listing_json(lp,0);
                 if ( json != 0 )
                 {
-                    retstr = cJSON_Print(json);
-                    str = AM_NXTorrent(NXTORRENT_LIST,Global_mp->timestamp,NXTaddr,retstr);
-                    if ( str == 0 )
-                        retstr = clonestr("{\"error\":\"couldnt create listing AM\"}");
+                    if ( decode_NXTorrent_json(&L,json) < 0 )
+                        retstr = clonestr("{\"error\":\"error parsing listing json\"}");
+                    else if ( (cmpval= cmp_NXTorrent_listings(lp,&L)) < 0 )
+                    {
+                        sprintf(buf,"{\"error\":\"error %d comparing listing json\"}",cmpval);
+                        retstr = clonestr(buf);
+                    }
                     else
                     {
-                        lp->listingAMbits = calc_nxt64bits(str);
-                        free(str);
+                        purge_NXTorrent_listing(&L,0);
+                        retstr = cJSON_Print(json);
+                        str = AM_NXTorrent(NXTORRENT_LIST,0,NXTORRENT_LISTINGADDR,lp->listing64bits,retstr);
+                        if ( str == 0 )
+                            retstr = clonestr("{\"error\":\"couldnt create listing AM\"}");
+                        else
+                        {
+                            lp->listingAMbits = calc_nxt64bits(str);
+                            free(str);
+                        }
                     }
                 }
                 else retstr = clonestr("{\"error\":\"unexpected JSON parse error\"}");
@@ -300,7 +537,7 @@ char *list_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
 
 char *makeoffer_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
 {
-    char NXTaddr[64],listingid[64],errstr[513],bid[512],*retstr = 0;
+    char NXTaddr[64],listingid[64],seller[64],errstr[513],bid[512],*retstr = 0;
     struct NXTorrent_listing *lp;
     copy_cJSON(NXTaddr,objs[0]);
     copy_cJSON(listingid,objs[1]);
@@ -314,7 +551,8 @@ char *makeoffer_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
             {
                 lp->status = NXTORRENT_OFFERED;
                 lp->buyer64bits = calc_nxt64bits(NXTaddr);
-                retstr = AM_NXTorrent(NXTORRENT_MAKEOFFER,Global_mp->timestamp,NXTaddr,bid);
+                expand_nxt64bits(seller,lp->seller64bits);
+                retstr = AM_NXTorrent(NXTORRENT_MAKEOFFER,0,seller,lp->listing64bits,bid);
                 retstr = standard_retstr(retstr);
             }
             else
@@ -342,7 +580,7 @@ char *acceptoffer_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
             lp->buyer64bits = calc_nxt64bits(buyer);
             lp->status = NXTORRENT_ACCEPTED;
             sprintf(buf,"{\"accept\":\"%s\",\"buyer\":\"%s\"}",listingid,buyer);
-            retstr = AM_NXTorrent(NXTORRENT_ACCEPT,Global_mp->timestamp,NXTaddr,buf);
+            retstr = AM_NXTorrent(NXTORRENT_ACCEPT,0,buyer,lp->listing64bits,buf);
             retstr = standard_retstr(retstr);
         } else retstr = clonestr(NXTORRENT_NOLISTING);
     }
@@ -351,35 +589,41 @@ char *acceptoffer_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
 
 char *feedback_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
 {
+    int32_t rating;
     uint64_t nxt64bits;
-    char NXTaddr[64],listingid[64],aboutbuyer[1024],aboutseller[1024],*str,*retstr = 0;
+    char NXTaddr[64],listingid[64],ratingstr[64],destaddr[64],aboutbuyer[1024],aboutseller[1024],*about,*retstr = 0;
     struct NXTorrent_listing *lp;
     copy_cJSON(NXTaddr,objs[0]);
     copy_cJSON(listingid,objs[1]);
-    copy_cJSON(aboutbuyer,objs[2]);
-    copy_cJSON(aboutseller,objs[3]);
+    copy_cJSON(ratingstr,objs[2]);
+    copy_cJSON(aboutbuyer,objs[3]);
+    copy_cJSON(aboutseller,objs[4]);
+    about = 0;
     if ( NXTaddr[0] != 0 && listingid[0] != 0 && (aboutbuyer[0] != 0 || aboutseller[0] != 0) )
     {
         lp = get_listingid(listingid);
         if ( lp != 0 )
         {
-            nxt64bits= calc_nxt64bits(NXTaddr);
+            nxt64bits = calc_nxt64bits(NXTaddr);
             if ( lp->buyer64bits == nxt64bits )
             {
                 if ( aboutbuyer[0] != 0 || aboutseller[0] == 0 )
                     return(clonestr("{\"error\":\"buyer can only feedback seller\"}"));
-                else str = aboutseller;
-                lp->status |= NXTORRENT_BUYERFLAG;
+                else about = aboutseller;
+                expand_nxt64bits(destaddr,lp->seller64bits);
+                lp->feedback.seller.rating = rating = atoi(ratingstr);
             }
             else if ( lp->seller64bits == nxt64bits )
             {
                 if ( aboutbuyer[0] == 0 || aboutseller[0] != 0 )
                     return(clonestr("{\"error\":\"seller can only feedback buyer\"}"));
-                else str = aboutbuyer;
-                lp->status |= NXTORRENT_SELLERFLAG;
+                else about = aboutbuyer;
+                expand_nxt64bits(destaddr,lp->buyer64bits);
+                lp->feedback.buyer.rating = rating = atoi(ratingstr);
             }
             else return(clonestr("{\"error\":\"neither buyer nor seller\"}"));
-            retstr = AM_NXTorrent(NXTORRENT_FEEDBACK,Global_mp->timestamp,NXTaddr,str);
+            // will wait for AM processing to set feedback abouts
+            retstr = AM_NXTorrent(NXTORRENT_FEEDBACK,rating,destaddr,lp->listing64bits,about);
             retstr = standard_retstr(retstr);
         } else retstr = clonestr(NXTORRENT_NOLISTING);
     }
@@ -408,7 +652,7 @@ char *NXTorrent_json_commands(struct NXTorrent_info *gp,cJSON *argjson,char *sen
     static char *cancel[] = { (char *)cancel_func, "cancel", "", "NXT", "listingid", 0 };
     static char *makeoffer[] = { (char *)makeoffer_func, "makeoffer", "", "NXT", "listingid", "bid", 0 };
     static char *acceptoffer[] = { (char *)acceptoffer_func, "acceptoffer", "", "NXT", "listingid", "buyer", 0 };
-    static char *feedback[] = { (char *)feedback_func, "feedback", "", "NXT", "listingid", "aboutbuyer", "aboutseller", 0 };
+    static char *feedback[] = { (char *)feedback_func, "feedback", "", "NXT", "listingid", "rating", "aboutbuyer", "aboutseller", 0 };
     static char **commands[] = { changeurl, listings, list, status, cancel, makeoffer, acceptoffer, feedback };
     int32_t i,j;
     cJSON *obj,*nxtobj,*objs[8];
@@ -493,14 +737,8 @@ void process_NXTorrent_AM(struct NXTorrent_info *dp,struct NXT_protocol_parms *p
     cJSON *argjson;
     char *jsontxt;
     struct json_AM *ap;
-    char NXTaddr[64],*sender,*receiver;
+    char *sender,*receiver;
     sender = parms->sender; receiver = parms->receiver; ap = parms->AMptr; //txid = parms->txid;
-    expand_nxt64bits(NXTaddr,ap->H.nxt64bits);
-    if ( strcmp(NXTaddr,sender) != 0 )
-    {
-        printf("unexpected NXTaddr %s != sender.%s when receiver.%s\n",NXTaddr,sender,receiver);
-        return;
-    }
     if ( ap->jsonflag != 0 )
     {
         jsontxt = (ap->jsonflag == 1) ? ap->jsonstr : decode_json(&ap->jsn);
@@ -510,6 +748,7 @@ void process_NXTorrent_AM(struct NXTorrent_info *dp,struct NXT_protocol_parms *p
             argjson = cJSON_Parse(jsontxt);
             if ( argjson != 0 )
             {
+                update_NXTorrent_state(dp,ap->funcid,ap->timestamp,argjson,ap->H.nxt64bits,sender,receiver);
                 free_json(argjson);
             }
         }
@@ -556,3 +795,4 @@ void *NXTorrent_handler(struct NXThandler_info *mp,struct NXT_protocol_parms *pa
 
 
 #endif
+
