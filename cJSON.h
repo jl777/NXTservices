@@ -38,6 +38,11 @@ extern "C"
 #define cJSON_Array 5
 #define cJSON_Object 6
 	
+#define is_cJSON_Array(json) ((json) != 0 && ((json)->type & 0xff) == cJSON_Array)
+#define is_cJSON_String(json) ((json) != 0 && ((json)->type & 0xff) == cJSON_String)
+#define is_cJSON_Number(json) ((json) != 0 && ((json)->type & 0xff) == cJSON_Number)
+#define is_cJSON_Object(json) ((json) != 0 && ((json)->type & 0xff) == cJSON_Object)
+    
 #define cJSON_IsReference 256
     
     /* The cJSON structure: */
@@ -137,10 +142,17 @@ extern "C"
     /* When assigning an integer value, it needs to be propagated to valuedouble too. */
 #define cJSON_SetIntValue(object,val)			((object)?(object)->valueint=(object)->valuedouble=(val):(val))
     
-int32_t expand_nxt64bits(char *NXTaddr,uint64_t nxt64bits);
 
 void copy_cJSON(char *dest,cJSON *obj);
-void free_json(cJSON *json);
+    cJSON *gen_list_json(char **list);
+    int32_t extract_cJSON_str(char *dest,int32_t max,cJSON *json,char *field);
+
+    void free_json(cJSON *json);
+    double _get_cJSON_float(cJSON *json);
+    double get_cJSON_float(cJSON *json,char *field);
+    int64_t get_cJSON_int(cJSON *json,char *field);
+    void add_satoshis_json(cJSON *json,char *field,uint64_t satoshis);
+    uint64_t get_satoshi_obj(cJSON *json,char *field);
 
 #ifdef __cplusplus
 }
