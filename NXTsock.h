@@ -275,7 +275,7 @@ int32_t wait_for_client(int32_t *sdp,char str[INET6_ADDRSTRLEN],int32_t variant)
 		serveraddr.sin6_addr   = in6addr_any;
 		if ( bind(*sdp,(struct sockaddr *)&serveraddr,sizeof(serveraddr)) < 0 )
 		{
-			printf("variant.%d\n",variant);
+			printf("failed to bind %s variant.%d\n",(char *)&serveraddr.sin6_addr,variant);
 			perror("variant bind() failed");
 			close(*sdp);
 			*sdp = -1;
@@ -402,27 +402,7 @@ void *_server_loop(void *_args)
 	}
 }
 
-int32_t bind_UDP_socket(int32_t port)
-{
-    struct sockaddr_in server_addr;
-    int sock;
-    //printf("bind_UDP_socket(%d)\n",port);
-    if ( (sock= socket(AF_INET,SOCK_DGRAM,0)) == -1 )
-    {
-        perror("Socket");
-        exit(1);
-    }
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    bzero(&(server_addr.sin_zero),8);
-    //printf("start bind\n");
-    if ( bind(sock,(struct sockaddr *)&server_addr,sizeof(struct sockaddr)) == -1 )
-    {
-        perror("SERVER: Bind error");
-        exit(1);
-    }
-    printf("got sock.%d\n",sock);
-    return(sock);
-}
+
+
+
 #endif
