@@ -1,4 +1,5 @@
 
+
 //  Created by jl777
 //  MIT License
 //
@@ -235,23 +236,71 @@ int32_t issue_startForging(char *secret)
     return(ret.val);
 }
 
-uint64_t issue_transferAsset(char *secret,char *recipient,char *asset,int64_t quantity,int64_t feeNQT,int32_t deadline,char *reftxid)
+uint64_t issue_transferAsset(char *secret,char *recipient,char *asset,int64_t quantity,int64_t feeNQT,int32_t deadline,char *comment)
 {
-    char cmd[4096];
-    union NXTtype ret;
-    sprintf(cmd,"%s=transferAsset&secretPhrase=%s&recipient=%s&asset=%s&quantity=%ld&feeNQT=%ld&deadline=%d&%s",NXTSERVER,secret,recipient,asset,(long)quantity,(long)feeNQT,deadline,reftxid!=0?reftxid:"");
-    ret = extract_NXTfield(0,cmd,"transaction",64);
-    printf("xfer asset.(%s) %s\n",cmd,nxt64str(ret.nxt64bits));
-    return(ret.nxt64bits);
+    char cmd[4096],*str,*jsontxt;
+    uint64_t txid = 0;
+    cJSON *json;
+    sprintf(cmd,"%s=transferAsset&secretPhrase=%s&recipient=%s&asset=%s&quantityQNT=%ld&feeNQT=%ld&deadline=%d",NXTSERVER,secret,recipient,asset,(long)quantity,(long)feeNQT,deadline);
+    if ( comment != 0 )  
+        strcat(cmd,"&comment="),strcat(cmd,comment);
+    jsontxt = issue_curl(cmd);
+    if ( jsontxt != 0 )
+    {
+     printf(" issuing asset.(%s) -> %s\n",cmd,jsontxt);
+        //if ( field != 0 && strcmp(field,"transactionId") == 0 )
+        //    printf("jsonstr.(%s)\n",jsonstr);
+        json = cJSON_Parse(jsontxt);
+        if ( json != 0 )
+        {
+            txid = get_satoshi_obj(json,"transaction");
+            if ( txid == 0 )
+            {
+                str = cJSON_Print(json);
+                printf("ERROR WITH ASSET TRANSFER.(%s) -> \n%s\n",cmd,str);
+                free(str);
+            }
+            free_json(json);
+        } else printf("error issuing asset.(%s) -> %s\n",cmd,jsontxt);
+        free(jsontxt);
+    }
+    return(txid);
+}
+
+char *issue_getTransaction(char *txidstr)
+{
+    char cmd[4096],*jsonstr,*retstr = 0;
+    sprintf(cmd,"%s=getTransaction&transaction=%s",NXTSERVER,txidstr);
+    jsonstr = issue_curl(cmd);
+    printf("getTransaction.%s %s\n",txidstr,jsonstr);
+    if ( jsonstr != 0 )
+    {
+        //retstr = parse_NXTresults(0,"sender","",results_processor,jsonstr,strlen(jsonstr));
+        free(jsonstr);
+    } else printf("error getting txid.%s\n",txidstr);
+    return(retstr);
 }
 
 int32_t get_NXTtxid_confirmations(char *txid)
 {
     char cmd[4096];
     union NXTtype ret;
+#ifdef DEBUG_MODE
+    if ( strcmp(txid,"123456") == 0 )
+        return(1000);
+#endif
     sprintf(cmd,"%s=getTransaction&transaction=%s",NXTSERVER,txid);
     ret = extract_NXTfield(0,cmd,"confirmations",sizeof(int32_t));
     return(ret.val);
+}
+
+uint64_t issue_getBalance(char *NXTaddr)
+{
+    char cmd[4096];
+    union NXTtype ret;
+    sprintf(cmd,"%s=getBalance&account=%s",NXTSERVER,NXTaddr);
+    ret = extract_NXTfield(0,cmd,"balanceNQT",64);
+    return(ret.nxt64bits);
 }
 
 int32_t issue_decodeToken(char sender[MAX_NXTADDR_LEN],int32_t *validp,char *key,char encoded[NXT_TOKEN_LEN])
@@ -264,7 +313,7 @@ int32_t issue_decodeToken(char sender[MAX_NXTADDR_LEN],int32_t *validp,char *key
     memcpy(token,encoded,NXT_TOKEN_LEN);
     token[NXT_TOKEN_LEN] = 0;
     sprintf(cmd,"%s=decodeToken&website=%s&token=%s",NXTSERVER,key,token);
-    printf("cmd.(%s)\n",cmd);
+    //printf("cmd.(%s)\n",cmd);
     retval = extract_NXTfield(0,cmd,0,0);
     if ( retval.json != 0 )
     {
@@ -306,10 +355,10 @@ int32_t issue_generateToken(char encoded[NXT_TOKEN_LEN],char *key,char *secret)
     return(-1);
 }
 
-char *submit_AM(struct NXT_AMhdr *ap,char *reftxid)
+char *submit_AM(char *recipient,struct NXT_AMhdr *ap,char *reftxid)
 {
     //union NXTtype retval;
-    int32_t len,deadline = 1440;
+    int32_t len,deadline = 10;
     cJSON *json,*txjson;
     char hexbytes[4096],cmd[5120],txid[MAX_NXTADDR_LEN],*jsonstr,*retstr = 0;
     len = ap->size;//(int)sizeof(*ap);
@@ -322,7 +371,7 @@ char *submit_AM(struct NXT_AMhdr *ap,char *reftxid)
    // printf("in submit_AM\n");
     memset(hexbytes,0,sizeof(hexbytes));
     init_hexbytes(hexbytes,(void *)ap,len);
-    sprintf(cmd,"%s=sendMessage&secretPhrase=%s&recipient=%s&message=%s&deadline=%u%s&feeNQT=%ld",Global_mp->NXTAPISERVER,Global_mp->NXTACCTSECRET,NXTISSUERACCT,hexbytes,deadline,reftxid!=0?reftxid:"",MIN_NQTFEE);
+    sprintf(cmd,"%s=sendMessage&secretPhrase=%s&recipient=%s&message=%s&deadline=%u%s&feeNQT=%ld",Global_mp->NXTAPISERVER,Global_mp->NXTACCTSECRET,recipient,hexbytes,deadline,reftxid!=0?reftxid:"",MIN_NQTFEE);
     //printf("submit_AM.(%s)\n",cmd);
     jsonstr = issue_curl(cmd);
     //printf("back from issue_curl\n");
@@ -417,7 +466,7 @@ void set_next_NXTblock(char *nextblock,char *blockidstr)
     if ( retval.json != 0 )
     {
         //printf("%s\n",cJSON_Print(retval.json));
-        errcode = (int32_t)get_JSON_int(retval.json,"errorCode");
+        errcode = (int32_t)get_cJSON_int(retval.json,"errorCode");
         if ( errcode == 0 )
         {
             nextjson = cJSON_GetObjectItem(retval.json,"nextBlock");
@@ -629,4 +678,57 @@ double dxblend(double *destp,double val,double decay)
 	return(slope);
 }
 
+int _increasing_unsignedint(const void *a,const void *b)
+{
+#define uint_a (((unsigned int *)a)[0])
+#define uint_b (((unsigned int *)b)[0])
+	if ( uint_b > uint_a )
+		return(-1);
+	else if ( uint_b < uint_a )
+		return(1);
+	return(0);
+#undef uint_a
+#undef uint_b
+}
+
+static int _increasing_float(const void *a,const void *b)
+{
+#define float_a (*(float *)a)
+#define float_b (*(float *)b)
+	if ( float_b > float_a )
+		return(-1);
+	else if ( float_b < float_a )
+		return(1);
+	return(0);
+#undef float_a
+#undef float_b
+}
 #endif
+
+
+int32_t bitweight(uint64_t x)
+{
+    int32_t wt,i;
+	wt = 0;
+	for (i=0; i<64; i++)
+	{
+		if ( (x & 1) != 0 )
+			wt++;
+		x >>= 1;
+		if ( x == 0 )
+			break;
+	}
+	return(wt);
+}
+
+void add_nxt64bits_json(cJSON *json,char *field,uint64_t nxt64bits)
+{
+    cJSON *obj;
+    char numstr[64];
+    if ( nxt64bits != 0 )
+    {
+        expand_nxt64bits(numstr,nxt64bits);
+        obj = cJSON_CreateString(numstr);
+        cJSON_AddItemToObject(json,field,obj);
+    }
+}
