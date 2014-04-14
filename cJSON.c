@@ -37,6 +37,8 @@ static const char *ep;
 long stripquotes(char *str)
 {
     long len,offset;
+    if ( str == 0 )
+        return(0);
     len = strlen(str);
     if ( str[0] == '"' && str[len-1] == '"' )
         str[len-1] = 0, offset = 1;
@@ -605,34 +607,7 @@ void cJSON_Minify(char *json)
 	*into=0;	// and null-terminate.
 }
 
-int64_t get_JSON_int(cJSON *json,char *field)
-{
-    char tmp[4096];
-    int64_t n = 0;
-    cJSON *numjson;
-    if ( json != 0 )
-    {
-        numjson = cJSON_GetObjectItem(json,field);
-        copy_cJSON(tmp,numjson);
-        n = atol(tmp);
-    }
-    return(n);
-}
-
-double get_JSON_float(cJSON *json,char *field)
-{
-    char tmp[4096];
-    double x = 0;
-    cJSON *numjson;
-    if ( json != 0 )
-    {
-        numjson = cJSON_GetObjectItem(json,field);
-        copy_cJSON(tmp,numjson);
-        x = atof(tmp);
-    }
-    return(x);
-}
-
+// the following written by jl777
 void copy_cJSON(char *dest,cJSON *obj)
 {
     char *str;
@@ -641,14 +616,56 @@ void copy_cJSON(char *dest,cJSON *obj)
     if ( obj != 0 )
     {
         str = cJSON_Print(obj);
-        offset = stripquotes(str);
-        strcpy(dest,str+offset);
-        free(str);
+        if ( str != 0 )
+        {
+            offset = stripquotes(str);
+            strcpy(dest,str+offset);
+            free(str);
+        }
     }
 }
 
-int32_t extract_JSON_str(char *dest,int32_t max,cJSON *json,char *field)
+double _get_cJSON_int(cJSON *json)
 {
+    char tmp[4096];
+    copy_cJSON(tmp,json);
+    return(atol(tmp));
+}
+
+int64_t get_cJSON_int(cJSON *json,char *field)
+{
+    cJSON *numjson;
+    if ( json != 0 )
+    {
+        numjson = cJSON_GetObjectItem(json,field);
+        if ( numjson != 0 )
+            return(_get_cJSON_int(numjson));
+    }
+    return(0);
+}
+
+double _get_cJSON_float(cJSON *json)
+{
+    char tmp[4096];
+    copy_cJSON(tmp,json);
+    return(atof(tmp));
+}
+
+double get_cJSON_float(cJSON *json,char *field)
+{
+    cJSON *numjson;
+    if ( json != 0 )
+    {
+        numjson = cJSON_GetObjectItem(json,field);
+        if ( numjson != 0 )
+            return(_get_cJSON_float(numjson));
+    }
+    return(0);
+}
+
+int32_t extract_cJSON_str(char *dest,int32_t max,cJSON *json,char *field)
+{
+    int32_t safecopy(char *dest,char *src,long len);
     char *str;
     cJSON *obj;
     int32_t len;
@@ -666,30 +683,6 @@ int32_t extract_JSON_str(char *dest,int32_t max,cJSON *json,char *field)
     return(0);
 }
 
-char *extract_jsonfield(char *text,char *field)
-{
-	char *out = 0;
-    cJSON *json,*obj = 0;
-	if ( text == 0 )
-        return(0);
-	json = cJSON_Parse(text);
-	if ( json == 0 ) printf("Error before: [%s]\n",cJSON_GetErrorPtr());
-	else
-	{
-		out = cJSON_Print(json);
-        obj = cJSON_DetachItemFromObject(json,field);
-		cJSON_Delete(json);
-        free(out);
-        if ( obj != 0 )
-        {
-            out = cJSON_Print(obj);
-            cJSON_Delete(obj);
-        } else out = 0;
-	}
-    free(text);
-    return(out);
-}
-
 cJSON *gen_list_json(char **list)
 {
     cJSON *array,*item;
@@ -702,22 +695,10 @@ cJSON *gen_list_json(char **list)
     return(array);
 }
 
-void add_nxt64bits_json(cJSON *json,char *field,uint64_t nxt64bits)
-{
-    cJSON *obj;
-    char numstr[64];
-    if ( nxt64bits != 0 )
-    {
-        expand_nxt64bits(numstr,nxt64bits);
-        obj = cJSON_CreateString(numstr);
-        cJSON_AddItemToObject(json,field,obj);
-    }
-}
-
-int64_t get_satoshi_obj(cJSON *json,char *field)
+uint64_t get_satoshi_obj(cJSON *json,char *field)
 {
     int32_t i,n;
-    int64_t prev,satoshis,mult = 1;
+    uint64_t prev,satoshis,mult = 1;
     char numstr[128];
     cJSON *numjson;
     numjson = cJSON_GetObjectItem(json,field);
@@ -727,21 +708,21 @@ int64_t get_satoshi_obj(cJSON *json,char *field)
     {
         satoshis += (mult * (numstr[i] - '0'));
         if ( satoshis < prev )
-            printf("get_satoshi_obj numstr.(%s) i.%d prev.%ld vs satoshis.%ld\n",numstr,i,(long)prev,(long)satoshis);
+            printf("get_satoshi_obj numstr.(%s) i.%d prev.%ld vs satoshis.%ld\n",numstr,i,(unsigned long)prev,(unsigned long)satoshis);
         prev = satoshis;
     }
     return(satoshis);
 }
 
-void add_satoshis_json(cJSON *json,char *field,int64_t satoshis)
+void add_satoshis_json(cJSON *json,char *field,uint64_t satoshis)
 {
     cJSON *obj;
     char numstr[64];
-    sprintf(numstr,"%ld",(long)satoshis);
+    sprintf(numstr,"%ld",(unsigned long)satoshis);
     obj = cJSON_CreateString(numstr);
     cJSON_AddItemToObject(json,field,obj);
     if ( satoshis != get_satoshi_obj(json,field) )
-        printf("error adding satoshi obj %ld -> %ld\n",(long)satoshis,(long)get_satoshi_obj(json,field));
+        printf("error adding satoshi obj %ld -> %ld\n",(unsigned long)satoshis,(unsigned long)get_satoshi_obj(json,field));
 }
 
 void free_json(cJSON *json) { if ( json != 0 ) cJSON_Delete(json); };
