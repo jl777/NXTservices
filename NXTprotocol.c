@@ -276,19 +276,19 @@ int32_t process_NXT_event(struct NXThandler_info *mp,int32_t histmode,char *txid
                     //printf("%x vs %x nxt.%lx\n",p->AMsigfilter,AMhdr->sig,(long)AMhdr->nxt64bits);
                     if ( p->AMsigfilter != 0 && p->AMsigfilter != AMhdr->sig )
                         continue;
-                    if ( strcmp(sender,NXTISSUERACCT) == 0 )
-                        expand_nxt64bits(sender,AMhdr->nxt64bits);
+                    //if ( strcmp(sender,NXTISSUERACCT) == 0 )
+                    //    expand_nxt64bits(sender,AMhdr->nxt64bits);
                 }
                 else if ( p->assetlist != 0 && assetid != 0 && listcmp(p->assetlist,assetid) != 0 )
                     continue;
-               // if ( assetid != 0 && strcmp(assetid,DOGE_COINASSET) == 0 )
-                //    printf("AMhdr.%p whitelist.%p listcmp %d %s\n",AMhdr,p->whitelist,listcmp(p->whitelist,sender),sender);
-                if ( strcmp(sender,GENESISACCT) == 0 || strcmp(receiver,GENESISACCT) == 0 ||
+               //if ( assetid != 0 && strcmp(assetid,DOGE_COINASSET) == 0 )
+               //     printf("AMhdr.%p whitelist.%p listcmp %d %s receiver.%s\n",AMhdr,p->whitelist,listcmp(p->whitelist,sender),sender,receiver);
+                if ( strcmp(sender,GENESISACCT) == 0 || strcmp(receiver,GENESISACCT) == 0 || //is_gateway_addr(sender) != 0 ||
                      (AMhdr == 0 || p->whitelist == 0 || listcmp(p->whitelist,sender) == 0) ||
                      (AMhdr != 0 && cmp_nxt64bits(sender,AMhdr->nxt64bits) == 0) )
                 {
                     //if ( assetid != 0 && strcmp(assetid,DOGE_COINASSET) == 0 )
-                     //   printf("priority.%d vs %d\n",p->priority,highest_priority);
+                    //   printf("priority.%d vs %d\n",p->priority,highest_priority);
                     if ( p->priority > highest_priority )
                     {
                         count = 1;
@@ -385,6 +385,7 @@ int32_t process_NXTtransaction(struct NXThandler_info *mp,int32_t histmode,char 
     int32_t createdflag,processed = 0;
     int64_t type,subtype,n,assetoshis = 0;
     union NXTtype retval;
+    memset(assetid,0,sizeof(assetid));
     sprintf(cmd,"%s=getTransaction&transaction=%s",NXTSERVER,txid);
     retval = extract_NXTfield(0,cmd,0,0);
     if ( retval.json != 0 )
@@ -408,8 +409,8 @@ int32_t process_NXTtransaction(struct NXThandler_info *mp,int32_t histmode,char 
                 return(0);
             }
         }
-        type = get_JSON_int(retval.json,"type");
-        subtype = get_JSON_int(retval.json,"subtype");
+        type = get_cJSON_int(retval.json,"type");
+        subtype = get_cJSON_int(retval.json,"subtype");
 
         senderobj = cJSON_GetObjectItem(retval.json,"sender");
         if ( senderobj == 0 )
@@ -444,7 +445,7 @@ int32_t process_NXTtransaction(struct NXThandler_info *mp,int32_t histmode,char 
                 {
                     if ( comment[0] != 0 )
                         commentstr = tp->comment = clonestr(comment);
-                    tp->quantity = SATOSHIDEN * get_JSON_int(attachment,"quantity");
+                    tp->quantity = SATOSHIDEN * get_cJSON_int(attachment,"quantity");
                     printf("quantity.%ld\n",(long)tp->quantity);
                     assetoshis = tp->quantity;
                     switch ( subtype )
@@ -497,17 +498,17 @@ int32_t process_NXTblock(int32_t *heightp,char *nextblock,struct NXThandler_info
     if ( retval.json != 0 )
     {
         //printf("%s\n",cJSON_Print(retval.json));
-        errcode = (int32_t)get_JSON_int(retval.json,"errorCode");
+        errcode = (int32_t)get_cJSON_int(retval.json,"errorCode");
         if ( errcode == 0 )
         {
-            *heightp = (int32_t)get_JSON_int(retval.json,"height");
-            timestamp = (int32_t)get_JSON_int(retval.json,"timestamp");
+            *heightp = (int32_t)get_cJSON_int(retval.json,"height");
+            timestamp = (int32_t)get_cJSON_int(retval.json,"timestamp");
             nextjson = cJSON_GetObjectItem(retval.json,"nextBlock");
             if ( nextjson != 0 )
                 copy_cJSON(nextblock,nextjson);
             else nextblock[0] = 0;
             transactions = cJSON_GetObjectItem(retval.json,"transactions");
-            n = get_JSON_int(retval.json,"numberOfTransactions");
+            n = get_cJSON_int(retval.json,"numberOfTransactions");
             if ( n != cJSON_GetArraySize(transactions) )
                 printf("JSON parse error!! %ld != %d\n",(long)n,cJSON_GetArraySize(transactions));
             if ( n != 0 )
