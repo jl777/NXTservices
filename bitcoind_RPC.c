@@ -15,6 +15,7 @@
 #include <sys/time.h>
 #include <curl/curl.h>
 #include <curl/easy.h>
+#include <stdint.h>
 
 #define EXTRACT_BITCOIND_RESULT     // if defined, ensures error is null and returns the "result" field
 
@@ -198,7 +199,7 @@ retry:
     elapsedsum2 += (milliseconds() - starttime);
 #ifndef __APPLE__
     if ( elapsedsum2/count > 10 || (milliseconds() - starttime) > 1000 )
-        printf("%d: %9.6f %9.6f | elapsed %.3f millis\n",count,elapsedsum/count,elapsedsum2/count,(milliseconds() - starttime));
+        fprintf(stderr,"%d: %9.6f %9.6f | elapsed %.3f millis | bitcoind_RPC.(%s)\n",count,elapsedsum/count,elapsedsum2/count,(milliseconds() - starttime),url);
 #endif
     return(post_process_bitcoind_RPC(debugstr,command,params,retstr));
 }
