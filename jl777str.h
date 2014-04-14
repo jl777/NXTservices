@@ -243,6 +243,28 @@ int64_t stripstr(char *buf,int64_t len)
     return(j);
 }
 
+char *replacequotes(char *str)
+{
+    char *newstr;
+    int32_t i,j,n;
+    for (i=n=0; str[i]!=0; i++)
+        n += (str[i] == '"') ? 3 : 1;
+    newstr = malloc(n + 1);
+    for (i=j=0; str[i]!=0; i++)
+    {
+        if ( str[i] == '"' )
+        {
+            newstr[j++] = '%';
+            newstr[j++] = '2';
+            newstr[j++] = '2';
+        }
+        else newstr[j++] = str[i];
+    }
+    newstr[j] = 0;
+    free(str);
+    return(newstr);
+}
+
 int64_t stripwhite(char *buf,int64_t len)
 {
     int32_t i,j,c;
