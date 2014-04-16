@@ -18,7 +18,7 @@ struct pubkey_info { char pubkey[128],coinaddr[64],server[64]; };
 
 struct multisig_addr
 {
-    char NXTaddr[MAX_NXTADDR_LEN],addr[MAX_COINADDR_LEN],redeemScript[256];
+    char NXTaddr[MAX_NXTADDR_LEN],multisigaddr[MAX_COINADDR_LEN],redeemScript[256];
     struct pubkey_info pubkeys[NUM_GATEWAYS];
     int32_t m,n,coinid,rippletag;
     int64_t maxunspent,unspent;
@@ -53,7 +53,7 @@ struct coin_value
 struct coin_txid
 {
     int64_t modified;
-    uint64_t confirmedAMbits;
+    uint64_t confirmedAMbits,NXTxferbits;
     char txid[MAX_COINTXID_LEN];
     int32_t numvins,numvouts,hasinternal,height;
     struct coin_value **vins,**vouts;
@@ -61,9 +61,9 @@ struct coin_txid
 
 struct rawtransaction
 {
-    char *destaddrs[4];
-    struct coin_value *inputs[16];
-    int64_t amount,change,inputsum,destamounts[4];
+    char *destaddrs[MAX_MULTISIG_OUTPUTS];
+    struct coin_value *inputs[MAX_MULTISIG_INPUTS];
+    int64_t amount,change,inputsum,destamounts[MAX_MULTISIG_OUTPUTS];
     int32_t numoutputs,numinputs;
     char rawtransaction[4096],signedtransaction[4096],txid[64];
 };
