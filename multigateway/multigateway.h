@@ -1,7 +1,7 @@
 //
 //  multigateway.h
 //  Created by jl777, Mar/April 2014
-//  MIT License
+//  MIT License 
 //
 
 #ifndef gateway_directnet_h
