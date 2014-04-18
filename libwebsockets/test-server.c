@@ -42,9 +42,15 @@
 #include <unistd.h>
 #endif
 
+#define LIBWEBSOCKETS_MILLIS 250
+#define LIBWEBSOCKETS_PORT 7777
+extern char testforms[1024*1024];
+unsigned char NXTprotocol_parms[4096];
+int32_t get_iDEX_json(unsigned char *buf);
+
 #include "../lib/libwebsockets.h"
 #include "../../libwebsocketsglue.h"
-unsigned char NXTprotocol_parms[4096];
+
 
 static int close_testing;
 int max_poll_elements;
@@ -239,7 +245,7 @@ static int callback_http(struct libwebsocket_context *context,struct libwebsocke
                 retstr = NXTprotocol_json_handler(nxtprotocol,(char *)NXTprotocol_parms);
                 if ( retstr != 0 )
                 {
-               //printf("NXTprotocol %s.(%s) -> (%s)\n",(char *)in,NXTprotocol_parms,retjson);
+//printf("NXTprotocol %s.(%s) -> (%s)\n",(char *)in,NXTprotocol_parms,retstr);
                     if ( sizeof(dispstr)-mylen-strlen((char *)in)-strlen(retstr)-64 > 0 )
                     {
                         strcat((char *)dispstr,(char *)in+1);
@@ -253,9 +259,11 @@ static int callback_http(struct libwebsocket_context *context,struct libwebsocke
             else
             {
                 static char *fileptr; static int64_t allocsize;
-                if ( load_file(NXTPROTOCOL_HTMLFILE,&fileptr,&mylen,&allocsize) != 0 )
+                if ( 1 && load_file(NXTPROTOCOL_HTMLFILE,&fileptr,&mylen,&allocsize) != 0 )
                 {
-                    printf("loaded NXTprotocol, len.%ld\n",(long)mylen);
+                    printf("loaded NXTprotocol, len.%ld + forms.%ld\n",(long)mylen,strlen(testforms));
+                    if ( URL_changed == 0 )
+                        mylen += strlen(testforms);
                     sprintf((char *)buffer,
                             "HTTP/1.0 200 OK\x0d\x0a"
                             "Server: NXTprotocol.jl777\x0d\x0a"
@@ -263,8 +271,28 @@ static int callback_http(struct libwebsocket_context *context,struct libwebsocke
                             "Content-Length: %u\x0d\x0a\x0d\x0a",
                             (unsigned int)mylen);
                     libwebsocket_write(wsi,buffer,strlen((char *)buffer),LWS_WRITE_HTTP);
+                    if ( URL_changed == 0 && testforms[0] != 0 )
+                       libwebsocket_write(wsi,(unsigned char *)testforms,strlen(testforms),LWS_WRITE_HTTP);
                     libwebsocket_write(wsi,(unsigned char *)fileptr,mylen,LWS_WRITE_HTTP);
-                } else printf("couldn't load NXTprotocol\n");
+                    return(-1);
+                }
+                else if ( URL_changed == 0 && testforms[0] != 0 )
+                {
+                    mylen = strlen(testforms);
+                    printf("testforms len %ld\n",(long)mylen);
+                    if ( mylen != 0 )
+                    {
+                        sprintf((char *)buffer,
+                                "HTTP/1.0 200 OK\x0d\x0a"
+                                "Server: NXTprotocol.jl777\x0d\x0a"
+                                "Content-Type: text/html\x0d\x0a"
+                                "Content-Length: %u\x0d\x0a\x0d\x0a",
+                                (unsigned int)mylen);
+                        libwebsocket_write(wsi,buffer,strlen((char *)buffer),LWS_WRITE_HTTP);
+                        libwebsocket_write(wsi,(unsigned char *)testforms,strlen(testforms),LWS_WRITE_HTTP);
+                        return(-1);
+                    }
+                }
             }
             /*if (!strcmp((const char *)in, "/leaf.jpg")) {
              if (strlen(resource_path) > sizeof(leaf_path) - 10)
@@ -465,7 +493,6 @@ struct per_session_data__dumb_increment {
 	int number;
 };
 
-int32_t get_iDEX_json(unsigned char *buf);
 
 static int
 callback_dumb_increment(struct libwebsocket_context *context,
@@ -498,9 +525,10 @@ callback_dumb_increment(struct libwebsocket_context *context,
             //free(tmp); free(tmp2);
             //m = libwebsocket_write(wsi, p, n, LWS_WRITE_TEXT);
             //printf("dispstr.(%s)\n",(char *)dispstr);
-            if ( strlen((char *)dispstr) > 0 )
+            n = strlen((char *)dispstr);
+            if ( n > 0 )
             {
-                m = libwebsocket_write(wsi, (unsigned char *)dispstr, strlen(dispstr), LWS_WRITE_TEXT);
+                m = libwebsocket_write(wsi, (unsigned char *)dispstr, n, LWS_WRITE_TEXT);
                 if (m < n) {
                     lwsl_err("ERROR %d writing to di socket\n", n);
                     return -1;
@@ -730,8 +758,6 @@ static struct option options[] = {
 	{ NULL, 0, 0, 0 }
 };
 
-//#include "NXTprotocol.c"
-
 int main(int argc, char **argv)
 {
 	char cert_path[1024];
@@ -753,7 +779,7 @@ int main(int argc, char **argv)
 #endif
     init_NXTprotocol();
 	memset(&info, 0, sizeof info);
-	info.port = 7777;
+	info.port = LIBWEBSOCKETS_PORT;
 
 	while (n >= 0) {
 		n = getopt_long(argc, argv, "ci:hsap:d:Dr:", options, NULL);
@@ -887,7 +913,7 @@ int main(int argc, char **argv)
 		 * as soon as it can take more packets (usually immediately)
 		 */
 
-		if (((unsigned int)tv.tv_usec - oldus) > 50000) {
+		if (((unsigned int)tv.tv_usec - oldus) > LIBWEBSOCKETS_MILLIS*1000) {
 			libwebsocket_callback_on_writable_all_protocol(&protocols[PROTOCOL_DUMB_INCREMENT]);
 			oldus = tv.tv_usec;
 		}
@@ -899,7 +925,7 @@ int main(int argc, char **argv)
 		 * which also includes libwebsocket sockets
 		 */
 
-		n = poll(pollfds, count_pollfds, 50);
+		n = poll(pollfds, count_pollfds, LIBWEBSOCKETS_MILLIS);
 		if (n < 0)
 			continue;
 
@@ -924,7 +950,7 @@ int main(int argc, char **argv)
 		 * the number of ms in the second argument.
 		 */
 
-		n = libwebsocket_service(context, 50);
+		n = libwebsocket_service(context, LIBWEBSOCKETS_MILLIS);
 #endif
 	}
 
