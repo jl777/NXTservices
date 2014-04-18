@@ -7,8 +7,6 @@
 int32_t Historical_done;
 struct NXThandler_info *Global_mp;
 
-
-
 int32_t get_asset_in_acct(struct NXT_acct *acct,struct NXT_asset *ap,int32_t createflag)
 {
     int32_t i;
@@ -230,6 +228,7 @@ char *NXTprotocol_json_handler(struct NXT_protocol *p,char *jsonstr)
         if ( strcmp(p->name,"NXTprotocol") == 0 )
             retjsontxt = NXTprotocol_json(json);
         else retjsontxt = (*p->NXT_handler)(Global_mp,&PARMS,p->handlerdata);
+        //printf("retjsontxt.%p\n",retjsontxt);
         if ( json != 0 )
             free_json(json);
     }
@@ -269,8 +268,8 @@ int32_t process_NXT_event(struct NXThandler_info *mp,int32_t histmode,char *txid
             //printf("type.%ld subtype.%ld vs (%d %d) AMhdr.%p\n",(long)type,(long)subtype,p->type,p->subtype,AMhdr);
             if ( AMhdr != 0 || ((p->type < 0 || p->type == type) && (p->subtype < 0 || p->subtype == subtype)) )
             {
-               // if ( assetid != 0 && strcmp(assetid,DOGE_COINASSET) == 0 )
-              //      printf("assetid.%p assetlist.%p\n",assetid,p->assetlist);
+                //if ( assetid != 0 && strcmp(assetid,DOGE_COINASSET) == 0 )
+                //    printf("assetid.%p assetlist.%p\n",assetid,p->assetlist);
                 if ( AMhdr != 0 )
                 {
                     //printf("%x vs %x nxt.%lx\n",p->AMsigfilter,AMhdr->sig,(long)AMhdr->nxt64bits);
@@ -287,8 +286,8 @@ int32_t process_NXT_event(struct NXThandler_info *mp,int32_t histmode,char *txid
                      (AMhdr == 0 || p->whitelist == 0 || listcmp(p->whitelist,sender) == 0) ||
                      (AMhdr != 0 && cmp_nxt64bits(sender,AMhdr->nxt64bits) == 0) )
                 {
-                    //if ( assetid != 0 && strcmp(assetid,DOGE_COINASSET) == 0 )
-                    //   printf("priority.%d vs %d\n",p->priority,highest_priority);
+                    if ( assetid != 0 && strcmp(assetid,DOGE_COINASSET) == 0 )
+                       printf("priority.%d vs %d assetoshis %.8f (%s)\n",p->priority,highest_priority,dstr(assetoshis),comment);
                     if ( p->priority > highest_priority )
                     {
                         count = 1;
@@ -440,13 +439,13 @@ int32_t process_NXTtransaction(struct NXThandler_info *mp,int32_t histmode,char 
                 tp = add_NXT_assettxid(&ap,assetid,mp,assetjson,txid);
                 commentobj = cJSON_GetObjectItem(attachment,"comment");
                 copy_cJSON(comment,commentobj);
-                printf("assetid.%s comment.%s\n",assetid,comment);
+               // printf("assetid.%s comment.%s (%s)\n",assetid,comment,cJSON_Print(attachment));
                 if ( tp != 0 && type == 2 )
                 {
                     if ( comment[0] != 0 )
                         commentstr = tp->comment = clonestr(comment);
-                    tp->quantity = SATOSHIDEN * get_cJSON_int(attachment,"quantity");
-                    printf("quantity.%ld\n",(long)tp->quantity);
+                    tp->quantity = get_cJSON_int(attachment,"quantityQNT");
+                    //printf("quantity.%ld\n",(long)tp->quantity);
                     assetoshis = tp->quantity;
                     switch ( subtype )
                     {
@@ -609,6 +608,7 @@ void *NXTloop(void *ptr)
                         sleep(mp->pollseconds);
                         call_handlers(mp,NXTPROTOCOL_IDLETIME);
                     }
+                    gen_testforms();
                 }
                 set_next_NXTblock(nextblock,mp->blockidstr);
             }
@@ -672,6 +672,8 @@ void start_NXTloops(struct NXThandler_info *mp,char *histstart)
     } else Historical_done = 1;
     if ( pthread_create(malloc(sizeof(pthread_t)),NULL,NXTloop,mp) != 0 )
         printf("ERROR NXTloop\n");
+    gen_testforms();
+
     //printf("after start init_NXThashtables: %p %p %p %p\n",mp->NXTguid_tablep,mp->NXTaccts_tablep,mp->NXTassets_tablep, mp->NXTasset_txids_tablep);
  //   NXTloop(mp);
 }
