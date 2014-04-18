@@ -1,6 +1,6 @@
 //
 //  libwebsocketsglue.h
-//  Created by jl777, April 5th, 2014
+//  Created by jl777, April  2014
 //  MIT License
 //
 
@@ -8,17 +8,39 @@
 #ifndef gateway_dispstr_h
 #define gateway_dispstr_h
 
+int URL_changed;
 char dispstr[65536];
+char testforms[1024*1024];
+char NXTPROTOCOL_HTMLFILE[512] = { "/Users/jl777/gateway/NXTprotocol.html" };
 
 #include "NXTprotocol.c"
 
-//#include "multigateway.h"
-//#include "InstantDEX.h"
-//struct NXThandler_info *Global_mp;
+char *changeurl_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
+{
+    extern char NXTPROTOCOL_HTMLFILE[512];
+    char URL[64],*retstr = 0;
+    copy_cJSON(URL,objs[0]);
+    if ( URL[0] != 0 )
+    {
+        URL_changed = 1;
+        strcpy(NXTPROTOCOL_HTMLFILE,URL);
+        testforms[0] = 0;
+        retstr = clonestr(URL);
+    }
+    return(retstr);
+}
 
-#define NXTPROTOCOL_HTMLFILE "/Users/jl777/Documents/NXT/gateway/gateway/NXTprotocol.html"
+#include "InstantDEX.h"
+#include "multigateway.h"
+#include "NXTorrent.h"
+#include "NXTsubatomic.h"
+#include "nodecoin.h"
+#include "NXTmixer.h"
+#include "html.h"
+
 #define STUB_SIG 0x99999999
-struct stub_info { char privatdata[10000]; }; struct stub_info *Global_dp;
+struct stub_info { char privatdata[10000]; };
+struct stub_info *Global_stub;
 
 char *stub_jsonhandler(cJSON *argjson)
 {
@@ -82,7 +104,7 @@ void *stub_handler(struct NXThandler_info *mp,struct NXT_protocol_parms *parms,v
         else if ( parms->mode == NXTPROTOCOL_INIT )
         {
             printf("stub NXThandler_info init %d\n",mp->RTflag);
-            dp = Global_dp = calloc(1,sizeof(*Global_dp));
+            dp = Global_stub = calloc(1,sizeof(*Global_stub));
         }
         return(dp);
     }
@@ -95,26 +117,27 @@ void *stub_handler(struct NXThandler_info *mp,struct NXT_protocol_parms *parms,v
 
 void init_NXTprotocol()
 {
-    //static char *whitelist[] = { NXTACCTA, NXTACCTB, NXTACCTC, "" };
+    static char *whitelist[] = { NXTISSUERACCT, NXTACCTA, NXTACCTB, NXTACCTC, "" };
+
     struct NXThandler_info *mp = calloc(1,sizeof(*mp));    // seems safest place to have main data structure
     Global_mp = mp;
     init_NXTAPI();
     memset(mp,0,sizeof(*mp));
     safecopy(mp->ipaddr,get_ipaddr(),sizeof(mp->ipaddr));
-#ifdef __APPLE__
-    //safecopy(mp->ipaddr,"181.47.159.125",sizeof(mp->ipaddr));
-#endif
-    mp->upollseconds = 100000 * 0;
+    //mp->upollseconds = 1000 * 1;
     mp->pollseconds = POLL_SECONDS;
-    gen_randomacct(33,mp->NXTADDR,mp->NXTACCTSECRET,"randvals");
     //set_passwords(mp,0,0);
     safecopy(mp->NXTAPISERVER,NXTSERVER,sizeof(mp->NXTAPISERVER));
-
-    //register_NXT_handler("InstantDEX",mp,2,-1,iDEXhandler,INSTANTDEX_SIG,1,0,0);
+    
+    gen_randomacct(33,mp->NXTADDR,mp->NXTACCTSECRET,"randvals");
+    printf(">>>>>>>>>>>>>>> %s NXT.(%s)\n",mp->ipaddr,mp->NXTADDR);
+    register_NXT_handler("NXTorrent",mp,NXTPROTOCOL_ILLEGALTYPE,NXTPROTOCOL_ILLEGALTYPE,NXTorrent_handler,NXTORRENT_SIG,1,0,0);
     //register_NXT_handler("multigateway",mp,2,-1,multigateway_handler,GATEWAY_SIG,1,0,whitelist);
-    register_NXT_handler("stub",mp,-1,-1,stub_handler,STUB_SIG,1,0,0);//whitelist);
+    //register_NXT_handler("InstantDEX",mp,NXTPROTOCOL_ILLEGALTYPE,NXTPROTOCOL_ILLEGALTYPE,iDEXhandler,INSTANTDEX_SIG,1,0,0);
+    //register_NXT_handler("subatomic",mp,NXTPROTOCOL_ILLEGALTYPE,NXTPROTOCOL_ILLEGALTYPE,subatomic_handler,SUBATOMIC_SIG,1,0,0);
+    //register_NXT_handler("stub",mp,-1,-1,stub_handler,STUB_SIG,1,0,0);//whitelist);
     mp->firsttimestamp = issue_getTime();
-    start_NXTloops(mp,"14006431524478461177");//"12980781150532356708");
+    start_NXTloops(mp,"2408234822244879292");//"4475075929652596255");//"14006431524478461177");//"12980781150532356708");
 }
 
 
