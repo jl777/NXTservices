@@ -123,7 +123,7 @@ struct compressed_json *encode_json(char *jsontext)
     return(jsn);
 }
 
-char *decode_json(struct compressed_json *jsn)
+char *decode_json(struct compressed_json *jsn,int32_t dictionaryid)
 {
     int32_t decoderet;
     unsigned char *decoded;
@@ -202,7 +202,7 @@ int32_t init_jsoncodec(char *jsontext)
         jsn = encode_json(jsontext);
         if ( jsn != 0 )
         {
-            decoded = decode_json(jsn);
+            decoded = decode_json(jsn,0);
             if ( decoded != 0 )
             {
                 cmpret = compare_jsontext(jsontext,decoded);
