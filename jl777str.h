@@ -265,6 +265,25 @@ char *replacequotes(char *str)
     return(newstr);
 }
 
+char *replace_backslashquotes(char *str)
+{
+    int32_t i,j,n;
+    if ( str == 0 )
+        return(0);
+    n = (int32_t)strlen(str);
+    if ( str[0] == '"' && str[n-1] == '"' )
+        str[n-1] = 0, i = 1;
+    else i = 0;
+    for (j=0; str[i]!=0; i++)
+    {
+        if ( str[i] == '\\' && str[i+1] == '"' )
+            str[j++] = '"', i++;
+        else str[j++] = str[i];
+    }
+    str[j] = 0;
+    return(str);
+}
+
 int64_t stripwhite(char *buf,int64_t len)
 {
     int32_t i,j,c;
