@@ -27,8 +27,6 @@ struct hashpacket
     union { void *result; uint64_t hashval; };
 };
 
-
-
 extern int32_t Historical_done;
 
 #define QUEUE_INITIALIZER(buffer) { buffer, sizeof(buffer) / sizeof(buffer[0]), 0, 0, 0, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER }
@@ -225,7 +223,7 @@ struct hashtable *resize_hashtable(struct hashtable *hp,int64_t newsize)
     uint64_t ind,newind;
     struct hashtable *newhp = calloc(1,sizeof(*newhp));
     *newhp = *hp;
-    //printf("about to resize %s %ld, hp.%p\n",hp->name,(long)hp->numitems,hp);
+    printf("about to resize %s %ld, hp.%p\n",hp->name,(long)hp->numitems,hp);
     newhp->hashsize = newsize;
     newhp->numitems = 0;
     newhp->hashtable = calloc(newhp->hashsize,sizeof(*newhp->hashtable));
@@ -261,7 +259,7 @@ struct hashtable *resize_hashtable(struct hashtable *hp,int64_t newsize)
     //printf("free hp.%p\n",hp);
     free(hp->hashtable);
     free(hp);
-    //printf("finished %s resized to %ld\n",newhp->name,(long)newhp->hashsize);
+    printf("finished %s resized to %ld\n",newhp->name,(long)newhp->hashsize);
     return(newhp);
 }
 
@@ -273,7 +271,8 @@ void *add_hashtable(int32_t *createdflagp,struct hashtable **hp_ptr,char *key)
     *createdflagp = 0;
     if ( key == 0 || *key == 0 || hp == 0 || strlen(key) >= hp->keysize )
     {
-        printf("%p key.(%s) len.%ld is too big for %s %ld\n",key,key,strlen(key),hp->name,hp->keysize);
+        printf("%p key.(%s) len.%ld is too big for %s %ld, FATAL\n",key,key,strlen(key),hp->name,hp->keysize);
+        while ( 1 ) sleep(1);
         return(0);
     }
     //printf("hp %p %p hashsize.%ld add_hashtable(%s)\n",hp_ptr,hp,(long)hp->hashsize,key);
@@ -313,19 +312,25 @@ void *MTadd_hashtable(int32_t *createdflagp,struct hashtable **hp_ptr,char *key)
         return(add_hashtable(createdflagp,hp_ptr,key));
     else
     {
-        //pthread_mutex_lock(&Global_mp->hash_mutex);
+        pthread_mutex_lock(&Global_mp->hash_mutex);
         ptr = calloc(1,sizeof(*ptr));
         ptr->createdflagp = createdflagp;
         ptr->hp_ptr = hp_ptr;
         ptr->key = key;
         ptr->funcid = 'A';
-        queue_enqueue(&Global_mp->hashtable_queue,ptr);
-        //pthread_mutex_unlock(&Global_mp->hash_mutex);
-        //printf("hashsize.%ld %p queued2 hp_ptr %p\n",(long)(*hp_ptr)->hashsize,ptr,hp_ptr);
+        while ( Global_mp->hashprocessing != 0 )
+            usleep(100);
+        Global_mp->hashprocessing = 1;
+        //printf("A Queue %p\n",ptr);
+        queue_enqueue(&Global_mp->hashtable_queue[1],ptr);
+        //printf("A Queued %p\n",ptr);
         while ( ptr->doneflag == 0 )
             usleep(1);
+        //printf("A Done %p\n",ptr);
         result = ptr->result;
         free(ptr);
+        Global_mp->hashprocessing = 0;
+        pthread_mutex_unlock(&Global_mp->hash_mutex);
         return(result);
     }
 }
@@ -339,39 +344,54 @@ uint64_t MTsearch_hashtable(struct hashtable **hp_ptr,char *key)
         return(search_hashtable(hp,key));
     else
     {
-        //pthread_mutex_lock(&Global_mp->hash_mutex);
+        pthread_mutex_lock(&Global_mp->hash_mutex);
         ptr = calloc(1,sizeof(*ptr));
         ptr->hp_ptr = hp_ptr;
         ptr->key = key;
         ptr->funcid = 'S';
-        queue_enqueue(&Global_mp->hashtable_queue,ptr);
-        //pthread_mutex_unlock(&Global_mp->hash_mutex);
-        //printf("hashsize.%ld %p queued hp_ptr %p\n",(long)(*hp_ptr)->hashsize,ptr,hp_ptr);
+        while ( Global_mp->hashprocessing != 0 )
+            usleep(100);
+        Global_mp->hashprocessing = 1;
+        //printf("B Queue %p\n",ptr);
+        queue_enqueue(&Global_mp->hashtable_queue[0],ptr);
+        //printf("B Queued %p\n",ptr);
         while ( ptr->doneflag == 0 )
             usleep(1);
+        //printf("B Done %p\n",ptr);
         hashval = ptr->hashval;
         free(ptr);
+        Global_mp->hashprocessing = 0;
+        pthread_mutex_unlock(&Global_mp->hash_mutex);
         return(hashval);
     }
 }
 
 void *process_hashtablequeues(void *_p) // serialize hashtable functions
 {
+    int32_t iter;
     struct hashpacket *ptr;
     while ( 1 )//Historical_done == 0 )
     {
         usleep(1 + Historical_done*1000);
         //pthread_mutex_lock(&Global_mp->hash_mutex);
-        while ( (ptr= queue_dequeue(&Global_mp->hashtable_queue)) != 0 )
+        //Global_mp->hashprocessing = 1;
+        for (iter=0; iter<2; iter++)
         {
-            //printf("numitems.%ld process.%p hp %p\n",(long)(*ptr->hp_ptr)->hashsize,ptr,ptr->hp_ptr);
-            if ( ptr->funcid == 'A' )
-                ptr->result = add_hashtable(ptr->createdflagp,ptr->hp_ptr,ptr->key);
-            else if ( ptr->funcid == 'S' )
-                ptr->hashval = search_hashtable(*ptr->hp_ptr,ptr->key);
-            else printf("UNEXPECTED MThashtable funcid.(%c) %d\n",ptr->funcid,ptr->funcid);
-            ptr->doneflag = 1;
+            while ( (ptr= queue_dequeue(&Global_mp->hashtable_queue[iter])) != 0 )
+            {
+                //printf("numitems.%ld process.%p hp %p\n",(long)(*ptr->hp_ptr)->hashsize,ptr,ptr->hp_ptr);
+                //printf(">>>>> Processs %p\n",ptr);
+                if ( ptr->funcid == 'A' )
+                    ptr->result = add_hashtable(ptr->createdflagp,ptr->hp_ptr,ptr->key);
+                else if ( ptr->funcid == 'S' )
+                    ptr->hashval = search_hashtable(*ptr->hp_ptr,ptr->key);
+                else printf("UNEXPECTED MThashtable funcid.(%c) %d\n",ptr->funcid,ptr->funcid);
+                ptr->doneflag = 1;
+                //printf("<<<<<< Finished Processs %p\n",ptr);
+                //printf("finished numitems.%ld process.%p hp %p\n",(long)(*ptr->hp_ptr)->hashsize,ptr,ptr->hp_ptr);
+            }
         }
+        //Global_mp->hashprocessing = 0;
         //pthread_mutex_unlock(&Global_mp->hash_mutex);
     }
     printf("finished processing hashtable MT queues\n");
@@ -379,4 +399,3 @@ void *process_hashtablequeues(void *_p) // serialize hashtable functions
     return(0);
 }
 #endif
-
