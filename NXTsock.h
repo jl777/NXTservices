@@ -160,7 +160,7 @@ int32_t server_request(int32_t *sdp,char *destserver,struct server_request_heade
     }
     if ( req->argsize == 0 )
         req->argsize = sizeof(struct server_request);
-    if ( req->retsize == 0 )
+    if ( 0 && req->retsize == 0 )
         req->retsize = sizeof(struct server_response);
     retsize = req->retsize;
     //printf("server requests variant.%d funcid.%d ind.%d argsize.%d retsize.%d\n",variant,funcid,ind,req->argsize,req->retsize);
@@ -211,11 +211,11 @@ int32_t server_request(int32_t *sdp,char *destserver,struct server_request_heade
         rc = connect(*sdp,res->ai_addr,res->ai_addrlen);
         if ( rc < 0 )
         {
+            printf("connection to %s variant.%d failure port.(%s) ",server,variant,servport);
             perror("connect() failed");
-            printf("connection to %s variant.%d failure port.(%s)\n",server,variant,servport);
             close(*sdp);
             *sdp = -1;
-            sleep(30);
+            sleep(1);
             //pthread_mutex_unlock(&mutex);
             return(-1);
         }
@@ -234,14 +234,14 @@ int32_t server_request(int32_t *sdp,char *destserver,struct server_request_heade
     }
     //usleep(1);
     rc = 0;
-    //printf("ind.%d retsize %d req->retsize.%d (variant.%d funcid.%d)\n",ind,retsize,req->retsize,variant,funcid);
+  //  printf("ind.%d retsize %d req->retsize.%d (variant.%d funcid.%d)\n",ind,retsize,req->retsize,variant,funcid);
     if ( retsize > 0 )
     {
         if ( (rc= wait_for_serverdata(sdp,(unsigned char *)req,retsize)) != retsize )
             printf("GATEWAY_RETSIZE error retsize.%d rc.%d\n",retsize,rc);
         //else usleep(1000);
     }
-    //printf("finished ind.%d retsize %d req->retsize.%d (variant.%d funcid.%d)\n",ind,retsize,req->retsize,variant,funcid);
+   // printf("finished ind.%d retsize %d req->retsize.%d (variant.%d funcid.%d)\n",ind,retsize,req->retsize,variant,funcid);
     close(*sdp);
     *sdp = -1;
     //pthread_mutex_unlock(&mutex);
@@ -306,7 +306,7 @@ int32_t wait_for_client(int32_t *sdp,char str[INET6_ADDRSTRLEN],int32_t variant)
 			getpeername(sdconn, (struct sockaddr *)&clientaddr,&addrlen);
 			if ( inet_ntop(AF_INET6, &clientaddr.sin6_addr, str, INET6_ADDRSTRLEN) != 0 )
 			{
-                printf("variant.%d [Client address is %20s | Client port is %6d] sdconn.%d\n",variant,str,ntohs(clientaddr.sin6_port),sdconn);
+                //printf("variant.%d [Client address is %20s | Client port is %6d] sdconn.%d\n",variant,str,ntohs(clientaddr.sin6_port),sdconn);
 			} else printf("Error getting client str\n");
 		}
 	}
@@ -395,7 +395,7 @@ void *_server_loop(void *_args)
                 //if ( variant == 0 ) // hacky special case!
                 break;
 			}
-            printf("Server.%ld loop xferred %ld bytes, in %d REQ's ave %ld bytes\n",(long)variant,xferred,numreqs,xferred/numreqs);
+           // printf("Server.%ld loop xferred %ld bytes, in %d REQ's ave %ld bytes\n",(long)variant,xferred,numreqs,xferred/numreqs);
 			close(sdconn);
 			//sdconn = -1;
 		}
