@@ -205,11 +205,11 @@ static int callback_http(struct libwebsocket_context *context,struct libwebsocke
 	struct timeval tv;
 	int n, m;
     int64_t mylen;
-	unsigned char *p;
+	//unsigned char *p;
     struct NXT_protocol *nxtprotocol;
 	char *other_headers;
 	static unsigned char buffer[4096];
-	struct stat stat_buf;
+	//struct stat stat_buf;
 	struct per_session_data__http *pss = (struct per_session_data__http *)user;
 	const char *mimetype;
 #ifdef EXTERNAL_POLL
@@ -279,7 +279,7 @@ static int callback_http(struct libwebsocket_context *context,struct libwebsocke
                 else if ( URL_changed == 0 && testforms[0] != 0 )
                 {
                     mylen = strlen(testforms);
-                    printf("testforms len %ld\n",(long)mylen);
+                    printf("couldnt load.(%s), testforms len %ld\n",NXTPROTOCOL_HTMLFILE,(long)mylen);
                     if ( mylen != 0 )
                     {
                         sprintf((char *)buffer,
@@ -500,13 +500,12 @@ callback_dumb_increment(struct libwebsocket_context *context,
 			enum libwebsocket_callback_reasons reason,
 					       void *user, void *in, size_t len)
 {
-	int32_t i,n, m;
-    unsigned char buffer[4096];
-	unsigned char buf[4096 + LWS_SEND_BUFFER_PRE_PADDING + 512 +
-						  LWS_SEND_BUFFER_POST_PADDING];
-	unsigned char *p = &buf[LWS_SEND_BUFFER_PRE_PADDING];
+	int32_t n, m;
+    //unsigned char buffer[4096];
+	//unsigned char buf[4096 + LWS_SEND_BUFFER_PRE_PADDING + 512 +LWS_SEND_BUFFER_POST_PADDING];
+	//unsigned char *p = &buf[LWS_SEND_BUFFER_PRE_PADDING];
 	struct per_session_data__dumb_increment *pss = (struct per_session_data__dumb_increment *)user;
-    char *tmp,*tmp2;
+   // char *tmp,*tmp2;
 
 	switch (reason) {
 
@@ -544,7 +543,7 @@ callback_dumb_increment(struct libwebsocket_context *context,
 //		fprintf(stderr, "rx %d\n", (int)len);
 		//if (len < 6)
 		//	break;
-            printf("button.(%s)\n",in);
+            printf("button.(%s)\n",(char *)in);
             if (strcmp((const char *)in, "reset\n") == 0)
                 pss->number = 10000000;
             else if (strcmp((const char *)in, "big\n") == 0)
