@@ -248,6 +248,22 @@ char *NXTprotocol_json_handler(struct NXT_protocol *p,char *jsonstr)
     return(retjsontxt);
 }
 
+cJSON *parse_json_AM(struct json_AM *ap)
+{
+    char *jsontxt;
+    if ( ap->jsonflag != 0 )
+    {
+        jsontxt = (ap->jsonflag == 1) ? ap->jsonstr : decode_json(&ap->jsn,ap->jsonflag);
+        if ( jsontxt != 0 )
+        {
+            if ( jsontxt[0] == '"' && jsontxt[strlen(jsontxt)-1] == '"' )
+                replace_backslashquotes(jsontxt);
+            return(cJSON_Parse(jsontxt));
+        }
+    }
+    return(0);
+}
+
 int32_t process_NXT_event(struct NXThandler_info *mp,int32_t histmode,char *txid,int64_t type,int64_t subtype,struct NXT_AMhdr *AMhdr,char *sender,char *receiver,char *assetid,int64_t assetoshis,char *comment,cJSON *json)
 {
     int32_t i,count,highest_priority;
@@ -286,8 +302,8 @@ int32_t process_NXT_event(struct NXThandler_info *mp,int32_t histmode,char *txid
                      (AMhdr == 0 || p->whitelist == 0 || listcmp(p->whitelist,sender) == 0) ||
                      (AMhdr != 0 && cmp_nxt64bits(sender,AMhdr->nxt64bits) == 0) )
                 {
-                    if ( assetid != 0 && strcmp(assetid,DOGE_COINASSET) == 0 )
-                       printf("priority.%d vs %d assetoshis %.8f (%s)\n",p->priority,highest_priority,dstr(assetoshis),comment);
+                    //if ( assetid != 0 && strcmp(assetid,DOGE_COINASSET) == 0 )
+                    //   printf("priority.%d vs %d assetoshis %.8f (%s)\n",p->priority,highest_priority,dstr(assetoshis),comment);
                     if ( p->priority > highest_priority )
                     {
                         count = 1;
@@ -593,7 +609,7 @@ void *NXTloop(void *ptr)
             do
             {
                 //printf("hist.%d do while init_NXThashtables: %p %p %p %p\n",mp->histmode,mp->NXTguid_tablep,mp->NXTaccts_tablep,mp->NXTassets_tablep, mp->NXTasset_txids_tablep);
-                if ( mp->upollseconds != 0 || NXTnetwork_healthy(mp) > 0 )
+                //if ( mp->upollseconds != 0 || NXTnetwork_healthy(mp) > 0 )
                 {
                     if ( mp->upollseconds != 0 )
                     {
@@ -610,6 +626,8 @@ void *NXTloop(void *ptr)
                     }
                     gen_testforms();
                 }
+                //else sleep(mp->pollseconds);
+                //printf("call set_next block\n");
                 set_next_NXTblock(nextblock,mp->blockidstr);
             }
             while ( nextblock[0] == 0 || strcmp(nextblock,mp->blockidstr) == 0 );
@@ -619,7 +637,9 @@ void *NXTloop(void *ptr)
     {
         mp = Global_mp;
         printf("HIST Waiting for hashtable queue to catchup: %ld\n",(long)time(0));
-        while ( queue_size(&mp->hashtable_queue) != 0 )
+        while ( queue_size(&mp->hashtable_queue[0]) != 0 )
+            usleep(1);
+        while ( queue_size(&mp->hashtable_queue[1]) != 0 )
             usleep(1);
         printf("HIST Historical processing has finished: %ld\n",(long)time(0));
         Historical_done = 1;
@@ -670,9 +690,10 @@ void start_NXTloops(struct NXThandler_info *mp,char *histstart)
         if ( pthread_create(malloc(sizeof(pthread_t)),NULL,NXTloop,&histM) != 0 )
             printf("ERROR start_Histloop\n");
     } else Historical_done = 1;
+    while ( Historical_done == 0 )
+        sleep(1);
     if ( pthread_create(malloc(sizeof(pthread_t)),NULL,NXTloop,mp) != 0 )
         printf("ERROR NXTloop\n");
-    gen_testforms();
 
     //printf("after start init_NXThashtables: %p %p %p %p\n",mp->NXTguid_tablep,mp->NXTaccts_tablep,mp->NXTassets_tablep, mp->NXTasset_txids_tablep);
  //   NXTloop(mp);
