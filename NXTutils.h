@@ -1,5 +1,4 @@
 
-
 //  Created by jl777
 //  MIT License
 //
@@ -35,7 +34,8 @@ char *load_file(char *fname,char **bufp,int64_t  *lenp,int64_t  *allocsizep)
             printf("Null buf ???\n");
         else
         {
-            fread(buf,1,filesize,fp);
+            if ( fread(buf,1,filesize,fp) != (unsigned long)filesize )
+                printf("error reading filesize.%ld\n",(long)filesize);
             buf[filesize] = 0;
         }
         fclose(fp);
@@ -52,7 +52,8 @@ char *_issue_cmd_to_buffer(char *prog,char *arg1,char *arg2,char *arg3)
     unsigned long len;
 	static pthread_mutex_t mutex;
  	pthread_mutex_lock(&mutex);
-    pipe(fd);
+    if ( pipe(fd) != 0 )
+        printf("_issue_cmd_to_buffer error doing pipe(fd)\n");
     pid_t pid = fork();
     if ( pid == 0 )
     {
@@ -65,7 +66,8 @@ char *_issue_cmd_to_buffer(char *prog,char *arg1,char *arg2,char *arg3)
             strcmp(arg1,"getaccountaddress") != 0 )
             fprintf(stderr,"ISSUE.(%s)\n",cmd);
 #endif
-        system(cmd);
+        if ( system(cmd) != 0 )
+            printf("error issuing system(%s)\n",cmd);
         exit(0);
     }
     else
@@ -267,6 +269,48 @@ uint64_t issue_transferAsset(char *secret,char *recipient,char *asset,int64_t qu
     return(txid);
 }
 
+int64_t get_coin_quantity(int64_t *unconfirmedp,int32_t coinid,char *NXTaddr)
+{
+    char *assetid_str(int32_t coinid);
+    char cmd[4096],assetid[512],*assetstr;
+    union NXTtype retval;
+    int32_t i,n,iter;
+    cJSON *array,*item,*obj;
+    int64_t quantity,qty;
+    quantity = *unconfirmedp = 0;
+    sprintf(cmd,"%s=getAccount&account=%s",NXTSERVER,NXTaddr);
+    retval = extract_NXTfield(0,cmd,0,0);
+    if ( retval.json != 0 )
+    {
+        assetstr = assetid_str(coinid);
+        for (iter=0; iter<2; iter++)
+        {
+            qty = 0;
+            array = cJSON_GetObjectItem(retval.json,iter==0?"assetBalances":"unconfirmedAssetBalances");
+            if ( is_cJSON_Array(array) != 0 )
+            {
+                n = cJSON_GetArraySize(array);
+                for (i=0; i<n; i++)
+                {
+                    item = cJSON_GetArrayItem(array,i);
+                    obj = cJSON_GetObjectItem(item,"asset");
+                    copy_cJSON(assetid,obj);
+                    //printf("i.%d of %d: %s(%s)\n",i,n,assetid,cJSON_Print(item));
+                    if ( strcmp(assetid,assetstr) == 0 )
+                    {
+                        qty = get_cJSON_int(item,iter==0?"balanceQNT":"unconfirmedBalanceQNT");
+                        break;
+                    }
+                }
+            }
+            if ( iter == 0 )
+                quantity = qty;
+            else *unconfirmedp = qty;
+        }
+    }
+    return(quantity);
+}
+
 char *issue_getTransaction(char *txidstr)
 {
     char cmd[4096],*jsonstr,*retstr = 0;
@@ -384,7 +428,10 @@ char *submit_AM(char *recipient,struct NXT_AMhdr *ap,char *reftxid)
             txjson = cJSON_GetObjectItem(json,"transaction");
             copy_cJSON(txid,txjson);
             if ( txid[0] != 0 )
+            {
                 retstr = clonestr(txid);
+                printf("AMtxid.%s\n",txid);
+            }
             free_json(json);
         }
     }
@@ -434,21 +481,21 @@ int32_t set_json_AM(struct json_AM *ap,int32_t sig,int32_t funcid,char *nxtaddr,
     ap->jsonflag = jsonflag;
     if ( jsonflag == 1 )
         strcpy(ap->jsonstr,jsonstr);//,999 - ((long)ap->jsonstr - (long)ap));
-    else if ( jsonflag == 2 )
+    else if ( jsonflag > 1 )
     {
         memcpy(&ap->jsn,jsn,sizeof(*jsn)+jsn->complen);
         free(jsn);
-        teststr = decode_json(&ap->jsn);
+        teststr = decode_json(&ap->jsn,jsonflag-2);
         if ( teststr != 0 )
         {
             stripstr(teststr,(int64_t)ap->jsn.origlen);
             if ( strcmp(teststr,jsonstr) != 0 )
                 printf("JSONcodec error (%s) != (%s)\n",teststr,jsonstr);
-            else printf("decoded.(%s) %d %d %d starting with %x\n",teststr,ap->jsn.complen,ap->jsn.origlen,ap->jsn.sublen,*(int32_t *)ap->jsn.encoded);
+            else printf("decoded.(%s) %d %d %d starting\n",teststr,ap->jsn.complen,ap->jsn.origlen,ap->jsn.sublen);
             free(teststr);
         }
     }
-    //printf("AM len.%ld vs %ld\n",len,strlen(ap->jsonstr));
+    printf("AM len.%ld vs %ld (%s)\n",len,strlen(ap->jsonstr),ap->jsonstr);
     ap->H.size = (int32_t)len;
     return(0);
 }
@@ -519,13 +566,15 @@ int32_t gen_randomacct(uint32_t randchars,char *NXTaddr,char *NXTsecret,char *ra
         {
             sprintf(buf,"dd if=/dev/random count=%d bs=1 > %s",randchars*8,fname);
             printf("cmd.(%s)\n",buf);
-            system(buf);
+            if ( system(buf) != 0 )
+                printf("error issuing system(%s)\n",buf);
             sleep(3);
         }
         fp = fopen(fname,"rb");
         if ( fp != 0 )
         {
-            fread(bits,1,sizeof(bits),fp);
+            if ( fread(bits,1,sizeof(bits),fp) == 0 )
+                printf("gen_random_acct: error reading bits\n");
             for (i=0; i+bitwidth<(sizeof(bits)*8) && i/bitwidth<randchars; i+=bitwidth)
             {
                 for (j=x=0; j<6; j++)
@@ -588,6 +637,7 @@ int32_t init_NXTAPI()
 struct NXT_acct *get_NXTacct(int32_t *createdp,struct NXThandler_info *mp,char *NXTaddr)
 {
     //printf("NXTaccts hash %p\n",mp->NXTaccts_tablep);
+    //printf("get_NXTacct.(%s)\n",NXTaddr);
     return(MTadd_hashtable(createdp,mp->NXTaccts_tablep,NXTaddr));
 }
 
@@ -704,6 +754,32 @@ static int _increasing_float(const void *a,const void *b)
 #undef float_b
 }
 #endif
+
+int _decreasing_unsignedint64(const void *a,const void *b)
+{
+#define uint_a (((uint64_t *)a)[0])
+#define uint_b (((uint64_t *)b)[0])
+	if ( uint_b > uint_a )
+		return(1);
+	else if ( uint_b < uint_a )
+		return(-1);
+	return(0);
+#undef uint_a
+#undef uint_b
+}
+
+int _decreasing_signedint64(const void *a,const void *b)
+{
+#define int_a (((int64_t *)a)[0])
+#define int_b (((int64_t *)b)[0])
+	if ( int_b > int_a )
+		return(1);
+	else if ( int_b < int_a )
+		return(-1);
+	return(0);
+#undef int_a
+#undef int_b
+}
 
 
 int32_t bitweight(uint64_t x)
