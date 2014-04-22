@@ -318,26 +318,34 @@ int multigateway_forms(char *NXTaddr,char **forms,char **scripts)
 }
 
 //static char *subatomic_trade[] = { (char *)subatomic_trade_func, "trade", "", "NXT", "coin", "amount", "coinaddr", "otherNXT", "othercoin", "otheramount", "othercoinaddr", "pubkey", "otherpubkey", 0 };
+//var listingTitle = document.listingValues.listingTitle.value;
+//var listingCategory = document.listingValues.listingCategory.value;
+//var listingCategory2 = document.listingValues.listingCategory2.value;
+//var listingCategory3 = document.listingValues.listingCategory3.value;
+//var listingDescription = document.listingValues.listingDescription.value;
+//var listingPrice = document.listingValues.listingPrice.value;
+
 int gen_subatomic_tradefields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
 {
     int n = 0;
-    char script[65536],vars[1024],*otherNXT,*coin,*amount,*coinaddr,*pubkey,*othercoin,*otheramount,*othercoinaddr,*otherpubkey;
-    coin = construct_varname(fields,n++,name,"coin","Specify coin:",0,0);
-    amount = construct_varname(fields,n++,name,"amount","Specify amount:",0,0);
-    coinaddr = construct_varname(fields,n++,name,"coinaddr","Specify your coinaddress:",60,1);
-    pubkey = construct_varname(fields,n++,name,"pubkey","Specify your pubkey:",0,0);
+    char script[65536],vars[1024],*destNXT,*coin,*amount,*coinaddr,*destcoin,*destamount,*destcoinaddr,*senderip;
+    senderip = construct_varname(fields,n++,name,"senderip","your IP address:",0,0);
 
-    otherNXT = construct_varname(fields,n++,name,"otherNXT","Specify other NXTaddr:",0,0);
-    othercoin = construct_varname(fields,n++,name,"othercoin","Specify othercoin:",0,0);
-    otheramount = construct_varname(fields,n++,name,"otheramount","Specify other amount:",0,0);
-    othercoinaddr = construct_varname(fields,n++,name,"othercoinaddr","Specify other coinaddress:",60,1);
-    otherpubkey = construct_varname(fields,n++,name,"otherpubkey","Specify other pubkey:",0,0);
-    
-    sprintf(vars,"\"coinaddr\":\"' + %s +'\",\"otherNXT\":\"' + %s +'\",\"othercoin\":\"' + %s +'\",\"otheramount\":\"' + %s +'\",\"othercoinaddr\":\"' + %s +'\",\"pubkey\":\"' + %s +'\",\"otherpubkey\":\"' + %s'\"",coinaddr,otherNXT,othercoin,otheramount,othercoinaddr,pubkey,otherpubkey);
-    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",\"coin\":\"' + %s +'\",\"amount\":\"' + %s +'\",%s}\n",name,handler,name,NXTaddr,coin,amount,vars);
+    coin = construct_varname(fields,n++,name,"coin","source coin:",0,0);
+    amount = construct_varname(fields,n++,name,"amount","source amount:",0,0);
+    coinaddr = construct_varname(fields,n++,name,"coinaddr","source coinaddress:",60,1);
+
+    destcoin = construct_varname(fields,n++,name,"destcoin","dest coin:",0,0);
+    destamount = construct_varname(fields,n++,name,"destamount","dest amount:",0,0);
+    destcoinaddr = construct_varname(fields,n++,name,"destcoinaddr","dest coinaddress:",60,1);
+
+    destNXT = construct_varname(fields,n++,name,"destNXT","NXT address you are trading with:",0,0);
+    sprintf(script,"function click_%s()\n{\nvar A = %s; B = %s; C = %s; D = %s; E = %s; F = %s; G = %s; H = %s;\n",name,coin,amount,coinaddr,destNXT,destcoin,destamount,destcoinaddr,senderip);
+    sprintf(vars,"\"coinaddr\":\"' + C + '\",\"senderip\":\"' + H + '\",\"destNXT\":\"' + D + '\",\"destcoin\":\"' + E + '\",\"destamount\":\"' + F + '\",\"destcoinaddr\":\"' + G + '\"");
+    sprintf(script+strlen(script),"location.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",\"coin\":\"' + A + '\",\"amount\":\"' + B + '\",%s}';\n}\n",handler,name,NXTaddr,vars);
     *scriptp = clonestr(script);
-    free(coin); free(amount); free(coinaddr); free(pubkey);
-    free(otherNXT); free(othercoin); free(otheramount); free(othercoinaddr); free(otherpubkey);
+    free(coin); free(amount); free(coinaddr);
+    free(destNXT); free(destcoin); free(destamount); free(destcoinaddr); free(senderip);
     return(n);
 }
 
@@ -377,18 +385,86 @@ int subatomic_forms(char *NXTaddr,char **forms,char **scripts)
     return(n);
 }
 
+
+char *teststr = "<!DOCTYPE html>\
+<html>\
+<head>\
+<meta charset=\"UTF-8\"/>\
+<title>NXTprotocol dev GUI</title>\
+<article>\
+<section class=\"browser\">NXTprotocol detected Browser: <div id=brow>...</div></section><BR><BR>\
+<section id=\"increment\" class=\"group2\">\
+<table>\
+<input type=button id=offset value=\"status\" onclick=\"click_subatomic_status();\" >\
+<input type=button id=offset value=\"cancel\" onclick=\"click_subatomic_cancel();\" >\
+<BR><BR>\
+<div id=number> </div>\
+<td>Your websocket connection status:</td>\
+<td id=wsdi_statustd align=center class=\"explain\"><div id=wsdi_status>Not initialized</div></td>\
+<BR>\
+</table>\
+</td></tr></table>\
+</section>\
+</article>\
+<script>\
+var pos = 0;\
+function get_appropriate_ws_url()\
+{\
+    var pcol;\
+    var u = document.URL;\
+    if (u.substring(0, 5) == \"https\") {\
+        pcol = \"wss://\";\
+        u = u.substr(8);\
+    } else {\
+        pcol = \"ws://\";\
+        if (u.substring(0, 4) == \"http\")\
+            u = u.substr(7);\
+    }\
+    u = u.split('/');\
+    return pcol + u[0] + \"/xxx\";\
+}\
+\
+document.getElementById(\"number\").textContent = get_appropriate_ws_url();\
+var socket_di;\
+if (typeof MozWebSocket != \"undefined\") {\
+    socket_di = new MozWebSocket(get_appropriate_ws_url(),\
+                                 \"dumb-increment-protocol\");\
+} else {\
+    socket_di = new WebSocket(get_appropriate_ws_url(),\
+                              \"dumb-increment-protocol\");\
+}\
+try {\
+    socket_di.onopen = function() {\
+        document.getElementById(\"wsdi_statustd\").style.backgroundColor = \"#40ff40\";\
+        document.getElementById(\"wsdi_status\").textContent = \"OPEN\";\
+    }\
+    socket_di.onmessage =function got_packet(msg) {\
+        document.getElementById(\"number\").textContent = msg.data + \"\n\";\
+    }\
+    socket_di.onclose = function(){\
+        document.getElementById(\"wsdi_statustd\").style.backgroundColor = \"#ff4040\";\
+        document.getElementById(\"wsdi_status\").textContent = \"CLOSED\";\
+    }\
+    } catch(exception) {\
+        alert('<p>Error' + exception);\
+    }\
+    </script>\
+    </head>";
+    
 void gen_testforms()
 {
     char *str;
-    strcpy(testforms,"<!DOCTYPE html>\n");
+    sprintf(testforms,"%s\n",teststr);
     str = gen_handler_forms(Global_mp->NXTADDR,"NXTorrent","NXTorrent API test forms",NXTorrent_forms);
+    //strcat(testforms,str);
+    free(str);
+    str = gen_handler_forms(Global_mp->NXTADDR,"subatomic","subatomic API test forms",subatomic_forms);
     strcat(testforms,str);
     free(str);
-   // str = gen_handler_forms(Global_mp->NXTADDR,"subatomic","subatomic API test forms",subatomic_forms);
-   // strcat(testforms,str);
-   // free(str);
     str = gen_handler_forms(Global_mp->NXTADDR,"multigateway","multigateway API test forms",multigateway_forms);
-    strcat(testforms,str);
+    //strcat(testforms,str);
     free(str);
- }
+    strcat(testforms,"</html>\n");
+    
+}
 #endif
