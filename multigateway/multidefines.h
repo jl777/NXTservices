@@ -48,7 +48,7 @@ static char *Server_names[NUM_GATEWAYS+1] = { SERVER_NAMEA, SERVER_NAMEB, SERVER
 // sudo netstat -lnp | grep ':22555 '
 
 #define BTC_COINID 1
-#define BTC_CONF "../.bitcoin/bitcoin.conf"
+#define BTC_CONF "bitcoin"
 #define BTC_TXFEE .0001           // don't forget to match txfee with coin
 #define BTC_MIN_CONFIRMS 3
 #define BTC_PORT "127.0.0.1:8332"
@@ -56,7 +56,7 @@ static char *Server_names[NUM_GATEWAYS+1] = { SERVER_NAMEA, SERVER_NAMEB, SERVER
 #define BTC_MARKER "17outUgtsnLkguDuXm14tcQ7dMbdD8KZGK"
 
 #define LTC_COINID 2
-#define LTC_CONF "../.litecoin/litecoin.conf"
+#define LTC_CONF "litecoin"
 #define LTC_TXFEE .001           // don't forget to match txfee with coin
 #define LTC_MIN_CONFIRMS 3
 #define LTC_PORT "127.0.0.1:9332"
@@ -64,7 +64,7 @@ static char *Server_names[NUM_GATEWAYS+1] = { SERVER_NAMEA, SERVER_NAMEB, SERVER
 #define LTC_MARKER "Le9hFCEGKDKp7qYpzfWyEFAq58kSQsjAqX"
 
 #define CGB_COINID 3
-#define CGB_CONF "../.cgbcoin/cgbcoin.conf"
+#define CGB_CONF "cgbcoin"
 #define CGB_TXFEE .0001           // don't forget to match txfee with coin
 #define CGB_MIN_CONFIRMS 3
 #define CGB_PORT "127.0.0.1:9902"
@@ -72,15 +72,15 @@ static char *Server_names[NUM_GATEWAYS+1] = { SERVER_NAMEA, SERVER_NAMEB, SERVER
 #define CGB_MARKER "PTqkPVfNkenMF92ZP8wfMQgQJc9DWZmwpB"
 
 #define DOGE_COINID 4
-#define DOGE_CONF "../.dogecoin/dogecoin.conf"
-#define DOGE_TXFEE 1.0000           // don't forget to match txfee with coin
+#define DOGE_CONF "dogecoin"
+#define DOGE_TXFEE 2.0000           // don't forget to match txfee with coin
 #define DOGE_MIN_CONFIRMS 3
 #define DOGE_PORT "127.0.0.1:22555"
 #define DOGE_FIRST_BLOCKHEIGHT 175713   //162555
 #define DOGE_MARKER "D72Xdw5cVyuX9JLivLxG3V9awpvj7WvsMi"
 
 #define DRK_COINID 5
-#define DRK_CONF "../.darkcoin/darkcoin.conf"
+#define DRK_CONF "darkcoin"
 #define DRK_TXFEE .01             // don't forget to match txfee with coin
 #define DRK_MIN_CONFIRMS 3
 #define DRK_PORT "127.0.0.1:9998"
@@ -89,15 +89,27 @@ static char *Server_names[NUM_GATEWAYS+1] = { SERVER_NAMEA, SERVER_NAMEB, SERVER
 
 #define ANC_COINID 6
 #define ANC_COINASSET ""
-#define ANC_CONF "../.anoncoin/anoncoin.conf"
+#define ANC_CONF "anoncoin"
 #define ANC_TXFEE .0001             // don't forget to match txfee with coin
 #define ANC_MIN_CONFIRMS 3
 #define ANC_PORT "127.0.0.1:9998"
 #define ANC_FIRST_BLOCKHEIGHT 0
 #define ANC_MARKER "D72Xdw5cVyuX9JLivLxG3V9awpvj7WvsMi"
 
-#define USD_COINID 7
-#define CNY_COINID 8
+
+#define BC_COINID 7
+#define BC_COINASSET ""
+#define BC_CONF "blackcoin"
+#define BC_TXFEE .01             // don't forget to match txfee with coin
+#define BC_MIN_CONFIRMS 3
+#define BC_PORT "127.0.0.1:15715"
+#define BC_FIRST_BLOCKHEIGHT 0
+#define BC_MARKER "BPyox1j426KkLy7x2uF3fygkSaM8LKVLY1"
+
+
+
+#define USD_COINID 63
+#define CNY_COINID 62
 
 
 #define MULTIGATEWAY_VARIANT 3
