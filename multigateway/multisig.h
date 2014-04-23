@@ -31,31 +31,40 @@ int32_t issue_directnet_getpubkey(int32_t destgateway,int32_t funcid,char *argst
     else return(-1);
 }
 
-char *get_coinaddr_pubkey(int32_t gatewayid,char *pubkey,struct daemon_info *cp,int32_t coinid,char *coinaddr)
+char *get_bitcoind_pubkey(char *pubkey,struct daemon_info *cp,char *coinaddr)
 {
     struct gateway_info *gp = Global_gp;
-    char addr[256];
-    struct directnet_getpubkey R;
-    char *retstr;
+    char addr[256],*retstr;
     cJSON *json,*pubobj;
-    if ( gatewayid == Global_gp->gatewayid )
+    int32_t coinid;
+    strcpy(pubkey,"error generating pubkey");
+    if ( cp == 0 )
+        return(0);
+    coinid = cp->coinid;
+    sprintf(addr,"\"%s\"",coinaddr);
+    retstr = bitcoind_RPC(coinid_str(coinid),cp->numretries,gp->serverport[coinid],gp->userpass[coinid],"validateaddress",addr);
+    if ( retstr != 0 )
     {
-        sprintf(addr,"\"%s\"",coinaddr);
-        retstr = bitcoind_RPC(coinid_str(coinid),cp->numretries,gp->serverport[coinid],gp->userpass[coinid],"validateaddress",addr);
-        if ( retstr != 0 )
+        printf("got retstr.(%s)\n",retstr);
+        json = cJSON_Parse(retstr);
+        if ( json != 0 )
         {
-            json = cJSON_Parse(retstr);
-            if ( json != 0 )
-            {
-                pubobj = cJSON_GetObjectItem(json,"pubkey");
-                copy_cJSON(pubkey,pubobj);
-                //printf("got.%s get_coinaddr_pubkey (%s)\n",coinid_str(coinid),pubkey);
-                free_json(json);
-            } else printf("get_coinaddr_pubkey.%s: parse error.(%s)\n",coinid_str(coinid),retstr);
-            free(retstr);
-            return(pubkey);
-        } else printf("%s error issuing validateaddress\n",coinid_str(coinid));
-    }
+            pubobj = cJSON_GetObjectItem(json,"pubkey");
+            copy_cJSON(pubkey,pubobj);
+            printf("got.%s get_coinaddr_pubkey (%s)\n",coinid_str(coinid),pubkey);
+            free_json(json);
+        } else printf("get_coinaddr_pubkey.%s: parse error.(%s)\n",coinid_str(coinid),retstr);
+        free(retstr);
+        return(pubkey);
+    } else printf("%s error issuing validateaddress\n",coinid_str(coinid));
+    return(0);
+}
+
+char *get_coinaddr_pubkey(int32_t gatewayid,char *pubkey,struct daemon_info *cp,int32_t coinid,char *coinaddr)
+{
+    struct directnet_getpubkey R;
+    if ( gatewayid == Global_gp->gatewayid )
+        return(get_bitcoind_pubkey(pubkey,cp,coinaddr));
     else
     {
         if ( issue_directnet_getpubkey(gatewayid,MULTIGATEWAY_GETPUBKEY,coinaddr,&R,cp,coinid) == 0 )
@@ -125,15 +134,14 @@ int32_t process_directnet_getpubkey(struct directnet_getpubkey *req,char *client
 // end of network functions
 
 
-struct multisig_addr *alloc_multisig_addr(int32_t coinid,int32_t n,char *NXTaddr)
+struct multisig_addr *alloc_multisig_addr(int32_t coinid,int32_t m,int32_t n,char *NXTaddr)
 {
     struct multisig_addr *msig;
     msig = calloc(1,sizeof(*msig));
     msig->n = n;
     msig->coinid = coinid;
     safecopy(msig->NXTaddr,NXTaddr,sizeof(msig->NXTaddr));
-    if ( n > 0 )
-        msig->m = msig->n - 1;
+    msig->m = m;
     return(msig);
 }
 
@@ -210,7 +218,7 @@ struct multisig_addr *decode_msigjson(char *NXTaddr,cJSON *obj)
             printf("name miscompare %s != %s\n",coinid_str(coinid),namestr);
             return(0);
         }
-        msig = alloc_multisig_addr(coinid,NUM_GATEWAYS,NXTaddr);
+        msig = alloc_multisig_addr(coinid,NUM_GATEWAYS-1,NUM_GATEWAYS,NXTaddr);
         addrobj = cJSON_GetObjectItem(obj,"address");
         redeemobj = cJSON_GetObjectItem(obj,"redeemScript");
         pubkeysobj = cJSON_GetObjectItem(obj,"pubkey");
@@ -256,16 +264,16 @@ struct multisig_addr *decode_msigjson(char *NXTaddr,cJSON *obj)
     return(0);
 }
 
-struct multisig_addr *gen_multisig_addr(struct daemon_info *cp,int32_t coinid,char *NXTaddr,char pubkeys[NUM_GATEWAYS][128],char coinaddrs[NUM_GATEWAYS][64])
+struct multisig_addr *gen_multisig_addr(int32_t m,int32_t n,struct daemon_info *cp,int32_t coinid,char *NXTaddr,char pubkeys[NUM_GATEWAYS][128],char coinaddrs[NUM_GATEWAYS][64])
 {
     struct gateway_info *gp = Global_gp;
     int32_t i,flag = 0;
     cJSON *json,*msigobj,*redeemobj;
     struct multisig_addr *msig;
     char *params,*retstr = 0;
-    if ( gp->gatewayid < 0 ) return(0);
-    msig = alloc_multisig_addr(coinid,NUM_GATEWAYS,NXTaddr);
-    for (i=0; i<NUM_GATEWAYS; i++)
+    if ( cp == 0 ) return(0);
+    msig = alloc_multisig_addr(coinid,m,n,NXTaddr);
+    for (i=0; i<n; i++)
     {
         safecopy(msig->pubkeys[i].pubkey,pubkeys[i],sizeof(msig->pubkeys[i].pubkey));
         safecopy(msig->pubkeys[i].coinaddr,coinaddrs[i],sizeof(msig->pubkeys[i].coinaddr));
@@ -274,7 +282,7 @@ struct multisig_addr *gen_multisig_addr(struct daemon_info *cp,int32_t coinid,ch
     params = createmultisig_json_params(msig);
     if ( params != 0 )
     {
-        // printf("multisig params.(%s)\n",params);
+         printf("multisig params.(%s)\n",params);
         retstr = bitcoind_RPC(coinid_str(coinid),cp->numretries,gp->serverport[coinid],gp->userpass[coinid],"createmultisig",params);
         if ( retstr != 0 )
         {
@@ -332,7 +340,7 @@ struct multisig_addr *gen_depositaddr(struct daemon_info *cp,int32_t coinid,char
         }
     }
     if ( gatewayid == NUM_GATEWAYS )
-        return(gen_multisig_addr(cp,coinid,NXTaddr,pubkeys,coinaddrs));
+        return(gen_multisig_addr(NUM_GATEWAYS-1,NUM_GATEWAYS,cp,coinid,NXTaddr,pubkeys,coinaddrs));
     printf("ERROR creating multisig addr for %s\n",NXTaddr);
     return(0);
 }
