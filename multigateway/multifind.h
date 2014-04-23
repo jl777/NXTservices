@@ -54,6 +54,7 @@ char *coinid_str(int32_t coinid)
         case CGB_COINID: return("CGB");
         case DOGE_COINID: return("DOGE");
         case DRK_COINID: return("DRK");
+        case BC_COINID: return("BC");
         case USD_COINID: return("USD");
         case CNY_COINID: return("CNY");
     }
@@ -69,6 +70,7 @@ char *assetid_str(int32_t coinid)
         case CGB_COINID: return(CGB_COINASSET);
         case DOGE_COINID: return(DOGE_COINASSET);
         case DRK_COINID: return(DRK_COINASSET);
+        case BC_COINID: return(BC_COINASSET);
         //case USD_COINID: return(USD_COINASSET);
         //case CNY_COINID: return(CNY_COINASSET);
     }
@@ -128,10 +130,12 @@ int32_t conv_assetid(char *assetid)
     return(-1);
 }
 
-#define get_coin_info(coinid) ((coinid >= 0 && coinid < 64) ? Global_gp->daemons[coinid] : 0)
-#define get_daemon_info get_coin_info
-#define find_coin_info(coinid) get_coin_info(get_coin_info(coinid));
-#define find_daemon_info find_coin_info
+struct daemon_info *get_daemon_info(int32_t coinid)
+{
+    if ( coinid >= 0 && coinid < 64 )
+        return(Global_gp->daemons[coinid]);
+    return(0);
+}
 
 int32_t get_gatewayid(char *ipaddr)
 {
