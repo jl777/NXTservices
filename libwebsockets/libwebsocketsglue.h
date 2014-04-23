@@ -10,7 +10,7 @@
 
 int URL_changed;
 char dispstr[65536];
-char testforms[1024*1024];
+char testforms[1024*1024],PC_USERNAME[512],MY_IPADDR[512];
 char NXTPROTOCOL_HTMLFILE[512] = { "/tmp/NXTprotocol.html" };
 
 #include "NXTprotocol.c"
@@ -30,7 +30,7 @@ char *changeurl_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
     return(retstr);
 }
 
-//#include "InstantDEX.h"
+#include "InstantDEX.h"
 #include "multigateway.h"
 #include "NXTorrent.h"
 #include "NXTsubatomic.h"
@@ -171,15 +171,18 @@ void init_NXTprotocol()
 
     struct NXThandler_info *mp = calloc(1,sizeof(*mp));    // seems safest place to have main data structure
     Global_mp = mp;
+    strcpy(MY_IPADDR,get_ipaddr());
     init_NXTAPI();
     memset(mp,0,sizeof(*mp));
-    safecopy(mp->ipaddr,get_ipaddr(),sizeof(mp->ipaddr));
+
+    safecopy(mp->ipaddr,MY_IPADDR,sizeof(mp->ipaddr));
     mp->upollseconds = 100000 * 0;
     mp->pollseconds = POLL_SECONDS;
     //set_passwords(mp,0,0);
     safecopy(mp->NXTAPISERVER,NXTSERVER,sizeof(mp->NXTAPISERVER));
     gen_randomacct(33,mp->NXTADDR,mp->NXTACCTSECRET,"randvals");
-  printf(">>>>>>>>>>>>>>> %s NXT.(%s)\n",mp->ipaddr,mp->NXTADDR);
+    mp->accountjson = issue_getAccountInfo(&Global_mp->acctbalance,mp->dispname,PC_USERNAME,mp->NXTADDR);
+    printf(">>>>>>>>>>>>>>> %s: %s %s NXT.(%s)\n",mp->dispname,PC_USERNAME,mp->ipaddr,mp->NXTADDR);
     register_NXT_handler("NXTorrent",mp,NXTPROTOCOL_ILLEGALTYPE,NXTPROTOCOL_ILLEGALTYPE,NXTorrent_handler,NXTORRENT_SIG,1,0,0);
     SUPPRESS_MULTIGATEWAY = 1;
     register_NXT_handler("subatomic",mp,NXTPROTOCOL_ILLEGALTYPE,NXTPROTOCOL_ILLEGALTYPE,subatomic_handler,SUBATOMIC_SIG,1,0,0);
