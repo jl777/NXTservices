@@ -88,9 +88,7 @@ enum demo_protocols {
 };
 
 
-//#define LOCAL_RESOURCE_PATH INSTALL_DATADIR"/libwebsockets-test-server"
 #define LOCAL_RESOURCE_PATH INSTALL_DATADIR
-//#define LOCAL_RESOURCE_PATH "/Users/jimbolaptop/Documents/NXT/gateway/gateway"
 char *resource_path = LOCAL_RESOURCE_PATH;
 
 /*
