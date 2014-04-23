@@ -129,7 +129,7 @@ void process_vins(struct daemon_info *cp,int32_t coinid,struct coin_txid *tp,int
                 copy_cJSON(txid,txidobj);
                 //printf("got txid.%s in i.%d\n",txid,i);
                 vintp = find_coin_txid(coinid,txid);
-                if ( vintp != 0 )
+                if ( vintp != 0 && vintp->vouts != 0 )
                 {
                     if ( search_multisig_addrs(coinid,vintp->vouts[vout]->coinaddr) != 0 && tp->hasinternal == 0 )
                     {
@@ -216,8 +216,6 @@ uint64_t process_vouts(char *debugstr,struct daemon_info *cp,int32_t coinid,stru
                     copy_cJSON(coinaddr,addrobj);
                     if ( i == 0 && strcmp(gp->internalmarker[coinid],coinaddr) == 0 )
                         isinternal = 1;
-                    if ( strcmp("3LCkMWiD9s8RibPVe8jrJ1WNeLaz4qfo1Y",coinaddr) == 0 )
-                        printf("call update_coin_value %s value %.8f script.%s\n",coinaddr,dstr(value),script);
                     vp = update_coin_value(cp,coinid,i>1?isinternal:0,isconfirmed,tp,i,tp->vouts[i],value,coinaddr,script);
                     if ( vp != 0 )
                     {
@@ -277,7 +275,7 @@ uint64_t calc_coin_unspent(struct daemon_info *cp,int32_t coinid,struct coin_txi
 void update_coin_values(struct daemon_info *cp,int32_t coinid,struct coin_txid *tp,int64_t blockheight,int32_t RTmode)
 {
     struct gateway_info *gp = Global_gp;
-    char *rawtransaction,*retstr,*str,txid[4096];
+    char *rawtransaction=0,*retstr=0,*str=0,txid[4096];
     cJSON *json;
     //int64_t unspent;
     int32_t isconfirmed;
@@ -304,11 +302,13 @@ void update_coin_values(struct daemon_info *cp,int32_t coinid,struct coin_txid *
                 process_vins(cp,coinid,tp,isconfirmed,cJSON_GetObjectItem(json,"vin"));
                 free_json(json);
             }
-            free(retstr);
         } else printf("error decoding.(%s)\n",str);
         free(str);
-        free(rawtransaction);
     } else printf("error with getrawtransaction %s %s\n",coinid_str(coinid),txid);
+    if ( retstr != 0 )
+        free(retstr);
+    if ( rawtransaction != 0 )
+        free(rawtransaction);
 #ifdef DEBUG_MODE
    /* if ( 1 )
     {
