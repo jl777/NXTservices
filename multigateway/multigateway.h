@@ -1,7 +1,7 @@
 //
 //  multigateway.h
 //  Created by jl777, Mar/April 2014
-//  MIT License 
+//  MIT License
 //
 
 #ifndef gateway_directnet_h
@@ -9,7 +9,7 @@
 
 #include "multidefines.h"
 #include "multistructs.h"
-
+int SUPPRESS_MULTIGATEWAY = 0;
 struct gateway_info *Global_gp;
 typedef char *(*json_handler)(char *NXTaddr,int32_t valid,cJSON **objs,int32_t numobjs);
 struct crosschain_info *update_crosschain_info(int32_t coinid,struct coin_txid *tp,struct coin_value *vp,int32_t isconfirmed,struct crosschain_info *xp,uint64_t value,char *coinaddr);
@@ -94,6 +94,10 @@ void *Coinloop(void *ptr)
     {
         for (coinid=0; coinid<64; coinid++)
         {
+#ifdef DEBUG_MODE
+            if ( coinid != DOGE_COINID )
+                continue;
+#endif
             cp = get_daemon_info(coinid);
             lp = get_replicated_coininfo(coinid);
             if ( lp == 0 )
@@ -206,7 +210,7 @@ int32_t init_multigateway(struct NXThandler_info *mp,struct gateway_info *gp)
     struct replicated_coininfo *lp;
     static char *whitelist[NUM_GATEWAYS+1];
     struct daemon_info *cp;
-    char *ipaddr,*coins[] = { "DOGE", "BTC", "LTC", "DRK", "" }; //"PPC","CGB",
+    char *ipaddr,*coins[] = { "DOGE", "BTC", "LTC", ""};//"DRK", "" }; //"PPC","CGB",
     static int64_t variant;
     printf("call init_multigateway gatewayid.%d\n",gp->gatewayid);
     ipaddr = get_ipaddr();
@@ -215,23 +219,20 @@ int32_t init_multigateway(struct NXThandler_info *mp,struct gateway_info *gp)
     for (i=0; coins[i][0]!=0; i++)
     {
         coinid = conv_coinstr(coins[i]);
-#ifdef DEBUG_MODE
-        //if ( coinid != BTC_COINID )
-        //    continue;
-#endif
         if ( coinid >= 0 )
         {
             cp = init_daemon_info(Global_gp,coins[i],0,0,0);
-            cp->coinid = coinid;
-            lp = get_replicated_coininfo(coinid);
-            if ( lp == 0 )
-                continue;
-            init_coin_tables(cp,coinid,Server_names[0],Server_names[1],Server_names[2]);
-            if ( gp->gatewayid >= 0 )
+            printf("coinid.%d %s cp.%p\n",coinid,coins[i],cp);
+            if ( cp != 0 )
             {
+                cp->coinid = coinid;
+                init_coin_tables(cp,coinid,Server_names[0],Server_names[1],Server_names[2]);
                 gp->daemons[coinid] = cp;
                 printf("Start %s height %ld\n",coinid_str(coinid),(long)(*cp->get_blockheight)(cp,coinid));
             }
+            lp = get_replicated_coininfo(coinid);
+            if ( lp == 0 )
+                continue;
             lp->genaddr_txids = hashtable_create("genaddr_txids",HASHTABLES_STARTSIZE,sizeof(*rp),((long)&rp->NXTaddr[0] - (long)rp),sizeof(rp->NXTaddr),((long)&rp->modified - (long)rp));
             lp->coin_txids = hashtable_create("coin_txids",HASHTABLES_STARTSIZE,sizeof(*tp),((long)&tp->txid[0] - (long)tp),sizeof(tp->txid),((long)&tp->modified - (long)tp));
             lp->redeemtxids = hashtable_create("redeemtxids",HASHTABLES_STARTSIZE,sizeof(*wp),((long)&wp->redeemtxid[0] - (long)wp),sizeof(wp->redeemtxid),((long)&wp->modified - (long)wp));
@@ -254,9 +255,8 @@ int32_t init_multigateway(struct NXThandler_info *mp,struct gateway_info *gp)
         if ( pthread_create(malloc(sizeof(pthread_t)),NULL,_server_loop,&variant) != 0 )
             printf("ERROR _server_loop\n");
     }
-    //if ( gp->numdaemons > 0 )
-        if ( pthread_create(malloc(sizeof(pthread_t)),NULL,Coinloop,gp) != 0 )
-            printf("ERROR Coin_genaddrloop\n");
+    if ( SUPPRESS_MULTIGATEWAY == 0 && pthread_create(malloc(sizeof(pthread_t)),NULL,Coinloop,gp) != 0 )
+        printf("ERROR Coin_genaddrloop\n");
     return(1);
 }
 
@@ -466,7 +466,9 @@ char *multigateway_jsonhandler(cJSON *argjson)
         obj = gen_coins_json(0);
         if ( obj != 0 )
             cJSON_AddItemToObject(json,"coins",obj);
-        return(cJSON_Print(json));
+        retstr = cJSON_Print(json);
+        free_json(json);
+        return(retstr);
     }
     else if ( (argjson->type&0xff) == cJSON_Array && cJSON_GetArraySize(argjson) == 2 )
     {
@@ -632,7 +634,7 @@ void *multigateway_handler(struct NXThandler_info *mp,struct NXT_protocol_parms 
     struct json_AM *ap;
     struct gateway_info *gp = handlerdata;
     char NXTaddr[64],*txid,*sender,*receiver;
-    char *jsontxt;
+   // char *jsontxt;
     int32_t createdflag,coinid;
     if ( parms->txid == 0 )     // indicates non-transaction event
     {
@@ -676,61 +678,49 @@ void *multigateway_handler(struct NXThandler_info *mp,struct NXT_protocol_parms 
     if ( parms->mode == NXTPROTOCOL_AMTXID )
     {
         expand_nxt64bits(NXTaddr,ap->H.nxt64bits);
-        if ( ap->jsonflag != 0 )
+        if ( (argjson = parse_json_AM(ap)) != 0 )
         {
-            jsontxt = (ap->jsonflag == 1) ? ap->jsonstr : decode_json(&ap->jsn);
-            if ( jsontxt != 0 )
+            printf("func.(%c) %s -> %s txid.(%s) assetid.(%s) JSON.(%s)\n",ap->funcid,sender,receiver,txid,parms->assetid,ap->jsonstr);
+            switch ( ap->funcid )
             {
-                //printf("got jsontxt.(%s)\n",jsontxt);
-                argjson = cJSON_Parse(jsontxt);
-                if ( argjson != 0 )
-                {
-                    printf("func.(%c) %s -> %s txid.(%s) assetid.(%s) JSON.(%s)\n",ap->funcid,sender,receiver,txid,parms->assetid,jsontxt);
-                    switch ( ap->funcid )
+                    // user created AM's
+                case GET_COINDEPOSIT_ADDRESS:
+                    update_coinacct_addresses(ap->H.nxt64bits,argjson,txid,-1);
+                    break;
+                    
+                    // gateway created AM's
+                case BIND_DEPOSIT_ADDRESS:
+                    if ( is_gateway_addr(sender) != 0 )
                     {
-                            // user created AM's
-                        case GET_COINDEPOSIT_ADDRESS:
-                            update_coinacct_addresses(ap->H.nxt64bits,argjson,txid,-1);
-                            break;
-                             
-                            // gateway created AM's
-                        case BIND_DEPOSIT_ADDRESS:
-                            if ( is_gateway_addr(sender) != 0 )
-                            {
-                                struct multisig_addr *msig;
-                                if ( (msig= decode_msigjson(NXTaddr,argjson)) != 0 )
-                                    if ( update_acct_binding(msig->coinid,NXTaddr,msig) == 0 )
-                                        free(msig);
-                            } else printf("sender.%s == NXTaddr.%s\n",sender,NXTaddr);
-                            break;
-                        case DEPOSIT_CONFIRMED:
-                            // need to mark cointxid with AMtxid to prevent confirmation process generating AM each time
-                            if ( is_gateway_addr(sender) != 0 && (coinid= decode_depositconfirmed_json(argjson,txid)) >= 0 )
-                            {
-                                if ( (lp= get_replicated_coininfo(coinid)) != 0 )
-                                {
-                                    queue_enqueue(&lp->retrydepositconfirmed.pingpong[0],argjson);
-                                    argjson = 0;    // preserve it as it is in retry queue
-                                }
-                            }
-                            break;
-                        case MONEY_SENT:
-                            if ( is_gateway_addr(sender) != 0 )
-                                update_money_sent(argjson,txid);
-                            break;
-                        default: printf("funcid.(%c) not handled\n",ap->funcid);
+                        struct multisig_addr *msig;
+                        if ( (msig= decode_msigjson(NXTaddr,argjson)) != 0 )
+                            if ( update_acct_binding(msig->coinid,NXTaddr,msig) == 0 )
+                                free(msig);
+                    } else printf("sender.%s == NXTaddr.%s\n",sender,NXTaddr);
+                    break;
+                case DEPOSIT_CONFIRMED:
+                    // need to mark cointxid with AMtxid to prevent confirmation process generating AM each time
+                    if ( is_gateway_addr(sender) != 0 && (coinid= decode_depositconfirmed_json(argjson,txid)) >= 0 )
+                    {
+                        if ( (lp= get_replicated_coininfo(coinid)) != 0 )
+                        {
+                            queue_enqueue(&lp->retrydepositconfirmed.pingpong[0],argjson);
+                            argjson = 0;    // preserve it as it is in retry queue
+                        }
                     }
-                    if ( argjson != 0 )
-                        free_json(argjson);
-                } else printf("can't JSON parse (%s)\n",jsontxt);
-                if ( ap->jsonflag != 1 )
-                    free(jsontxt);
-            } else printf("missing compressed json AMlen.%d (%d %d %d) %x? %s -> %s funcid.%d\n",ap->H.size,ap->jsn.complen,ap->jsn.origlen,ap->jsn.sublen,*(int32_t *)ap->jsn.encoded,sender,receiver,ap->funcid);
-        }
+                    break;
+                case MONEY_SENT:
+                    if ( is_gateway_addr(sender) != 0 )
+                        update_money_sent(argjson,txid);
+                    break;
+                default: printf("funcid.(%c) not handled\n",ap->funcid);
+            }
+            if ( argjson != 0 )
+                free_json(argjson);
+        } else printf("can't JSON parse (%s)\n",ap->jsonstr);
     }
     else if ( parms->assetid != 0 && parms->assetoshis > 0 )
         multigateway_assetevent(sender,receiver,txid,parms->assetid,parms->assetoshis,parms->comment);
-    gen_testforms();
     return(0);
 }
 
