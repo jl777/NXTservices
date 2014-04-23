@@ -64,7 +64,7 @@ struct rawtransaction
     char *destaddrs[MAX_MULTISIG_OUTPUTS];
     struct coin_value *inputs[MAX_MULTISIG_INPUTS];
     int64_t amount,change,inputsum,destamounts[MAX_MULTISIG_OUTPUTS];
-    int32_t numoutputs,numinputs;
+    int32_t numoutputs,numinputs,completed,broadcast,confirmed;
     char rawtransaction[4096],signedtransaction[4096],txid[64];
 };
 
@@ -99,7 +99,7 @@ struct coin_acct
 struct replicated_coininfo // runs on all nodes and only needs NXT blockchain
 {
     char name[64],assetid[64];
-    int32_t coinid,timestamp,nummsigs,numxps,numtransfers,numredemptions,nummoneysends,pollseconds;
+    int32_t coinid,timestamp,nummsigs,numxps,numtransfers,numredemptions,nummoneysends,pollseconds,estblocktime;
     int64_t txfee,markeramount,NXTheight;
     struct balance_info funds;
     struct unspent_info unspent;
@@ -118,7 +118,8 @@ struct replicated_coininfo // runs on all nodes and only needs NXT blockchain
 
 struct daemon_info
 {
-    int32_t numretries,mismatch,coinid;
+    int64_t txfee;
+    int32_t numretries,mismatch,coinid,minconfirms,estblocktime;
     int32_t (*validate_coinaddr)(struct daemon_info *cp,int32_t coinid,char *coinaddr);
     int32_t (*add_unique_txids)(struct daemon_info *cp,int32_t coinid,int64_t blockheight,int32_t RTmode);
     int64_t (*get_blockheight)(struct daemon_info *cp,int32_t coinid);
