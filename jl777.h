@@ -6,9 +6,6 @@
 #ifndef gateway_jl777_h
 #define gateway_jl777_h
 
-#define PC_USERNAME <put your username here>
-#define MY_IPADDR <put your ipaddr here>
-
 #define DEBUG_MODE
 
 #include <stdio.h>
@@ -130,13 +127,14 @@ struct NXThandler_info
 {
     double fractured_prob;  // probability NXT network is fractured, eg. major fork or attack in progress
     int32_t upollseconds,pollseconds,firsttimestamp,timestamp,deadman,RTflag,NXTheight,histmode,hashprocessing;
+    int64_t acctbalance;
     pthread_mutex_t hash_mutex;
     void *handlerdata;
     char *origblockidstr,lastblock[256],blockidstr[256];
     queue_t hashtable_queue[2];
     struct hashtable **NXTaccts_tablep,**NXTassets_tablep,**NXTasset_txids_tablep,**NXTguid_tablep;
-
-    char ipaddr[64],NXTAPISERVER[128],NXTADDR[64],NXTACCTSECRET[256];//,COINSECRET[128];
+    cJSON *accountjson;
+    char ipaddr[64],NXTAPISERVER[128],NXTADDR[64],NXTACCTSECRET[256],dispname[128];
 };
 struct NXT_acct *get_NXTacct(int32_t *createdp,struct NXThandler_info *mp,char *NXTaddr);
 extern struct NXThandler_info *Global_mp;
