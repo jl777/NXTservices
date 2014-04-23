@@ -6,12 +6,15 @@
 #ifndef gateway_jl777_h
 #define gateway_jl777_h
 
+#define PC_USERNAME <put your username here>
+#define MY_IPADDR <put your ipaddr here>
+
 #define DEBUG_MODE
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
-#include <unistd.h>
+//#include <unistd.h>
 #include <string.h>
 #include <memory.h>
 #include <math.h>
@@ -126,11 +129,11 @@ struct NXT_str
 struct NXThandler_info
 {
     double fractured_prob;  // probability NXT network is fractured, eg. major fork or attack in progress
-    int32_t upollseconds,pollseconds,firsttimestamp,timestamp,deadman,RTflag,NXTheight,histmode;
+    int32_t upollseconds,pollseconds,firsttimestamp,timestamp,deadman,RTflag,NXTheight,histmode,hashprocessing;
     pthread_mutex_t hash_mutex;
     void *handlerdata;
     char *origblockidstr,lastblock[256],blockidstr[256];
-    queue_t hashtable_queue;
+    queue_t hashtable_queue[2];
     struct hashtable **NXTaccts_tablep,**NXTassets_tablep,**NXTasset_txids_tablep,**NXTguid_tablep;
 
     char ipaddr[64],NXTAPISERVER[128],NXTADDR[64],NXTACCTSECRET[256];//,COINSECRET[128];
@@ -179,13 +182,13 @@ struct NXT_protocol *NXThandlers[1000]; int Num_NXThandlers;
 #define MAX(x,y) (((x)>=(y)) ? (x) : (y))
 
 char *bitcoind_RPC(char *debugstr,int32_t numretries,char *url,char *userpass,char *command,char *args);
-#define issue_curl(cmdstr) bitcoind_RPC("NXT",3,cmdstr,0,0,0)
+#define issue_curl(cmdstr) bitcoind_RPC("NXT",NUM_BITCOIND_RETRIES,cmdstr,0,0,0)
 #define fetch_URL(cmdstr) bitcoind_RPC("fetch",0,cmdstr,0,0,0)
+void gen_testforms();
 
 #include "utils/jl777hash.h"
 #include "utils/NXTutils.h"
 #include "utils/NXTsock.h"
 #include "NXTprotocol.h"
-#include "InstantDEX.h"
 
 #endif
