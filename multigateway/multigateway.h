@@ -130,9 +130,9 @@ void *Coinloop(void *ptr)
             NXTheight = Global_mp->NXTheight;
             if ( NXTheight > lp->NXTheight )
             {
-                struct coin_acct *acct = get_coin_acct(DOGE_COINID,"8989816935121514892");
-                if ( acct != 0 )
-                    printf("acct.%p withdrawaddr.(%s)\n",acct,acct->withdrawaddr);
+                //struct coin_acct *acct = get_coin_acct(DOGE_COINID,"8989816935121514892");
+                //if ( acct != 0 )
+                //    printf("acct.%p withdrawaddr.(%s)\n",acct,acct->withdrawaddr);
                 transfer_assets(coinid);
             }
             if ( cp == 0 || gp->blockheight[coinid] <= (height = (*cp->get_blockheight)(cp,coinid)) )
