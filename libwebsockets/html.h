@@ -1,727 +1,470 @@
 //
-//  multigateway.h
-//  Created by jl777, Mar/April 2014
+//  html.h
+//  Created by jl777, April 2014
 //  MIT License
 //
 
-#ifndef gateway_directnet_h
-#define gateway_directnet_h
+#ifndef gateway_html_h
+#define gateway_html_h
 
-#include "multidefines.h"
-#include "multistructs.h"
-int SUPPRESS_MULTIGATEWAY = 0;
-struct gateway_info *Global_gp;
-typedef char *(*json_handler)(char *NXTaddr,int32_t valid,cJSON **objs,int32_t numobjs);
-struct crosschain_info *update_crosschain_info(int32_t coinid,struct coin_txid *tp,struct coin_value *vp,int32_t isconfirmed,struct crosschain_info *xp,uint64_t value,char *coinaddr);
-int32_t sign_rawtransaction(char *deststr,unsigned long destsize,struct daemon_info *cp,int32_t coinid,struct rawtransaction *rp,char *rawbytes);
-//int32_t set_pending_assetxfer(int32_t coinid,char *coinaddr,char *cointxid,int32_t vout,int64_t value,uint64_t nxt64bits,char *AMtxid,uint64_t NXTtxid,int64_t assetoshis);
-int32_t xp_vout(struct crosschain_info *xp) { if ( xp->parent != 0 ) return(xp->parent->parent_vout); return(-1); }
-char *xp_coinaddr(struct crosschain_info *xp) { if ( xp->parent != 0 ) return(xp->parent->coinaddr); return("<no addr>"); }
-char *xp_txid(struct crosschain_info *xp) { if ( xp->parent != 0 && xp->parent->parent != 0 ) return(xp->parent->parent->txid); return("<no txid>"); }
-char *xp_NXTaddr(struct crosschain_info *xp) { if ( xp->msig != 0 ) return(xp->msig->NXTaddr); return("<no NXTaddr>"); }
-char *createrawtxid_json_params(char **localcoinaddrs,int32_t coinid,struct rawtransaction *rp);
-
-#include "multifind.h"
-#include "genjson.h"
-#include "balances.h"
-#include "multisig.h"
-#include "bitcoin.h"
-#include "daemon.h"
-#include "gateway.h"
-#include "multiwithdraw.h"
-#include "multideposit.h"
-
-int32_t is_gateway_addr(char *addr)
+char *formfield(char *name,char *disp,int cols,int rows)
 {
-    if ( strcmp(addr,NXTISSUERACCT) == 0 || strcmp(addr,NXTACCTA) == 0 || strcmp(addr,NXTACCTB) == 0 || strcmp(addr,NXTACCTC) == 0 )
-        return(1);
-    return(0);
+    char str[512],buf[1024];
+    if ( rows == 0 && cols == 0 )
+        sprintf(str,"<input type=\"text\" name=\"%s\"/>",name);
+    else sprintf(str,"<textarea cols=\"%d\" rows=\"%d\"  name=\"%s\"/></textarea>",cols,rows,name);
+    sprintf(buf,"<td>%s</td> <td> %s </td> </tr>\n<tr>\n",disp,str);
+    return(clonestr(buf));
 }
 
-char *AM_get_coindeposit_address(int32_t sig,int32_t timestamp,char *nxtaddr,char *coinjsontxt)
+char *make_form(char *NXTaddr,char **scriptp,char *name,char *disp,char *button,char *url,char *path,int (*fields_func)(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp))
 {
-    char AM[4096];
-    struct json_AM *ap = (struct json_AM *)AM;
-    printf("get deposit_addrs(%s)\n",coinjsontxt);
-    set_json_AM(ap,sig,GET_COINDEPOSIT_ADDRESS,nxtaddr,timestamp,coinjsontxt,1);
-    return(submit_AM(NXTISSUERACCT,&ap->H,0));
-}
-
-int32_t retrydepositconfirmed(void **ptrp,struct replicated_coininfo *lp)
-{
-    cJSON *argjson = *ptrp;
-    if ( decode_depositconfirmed_json(argjson,0) != 0 )
+    int i,n;
+    char *fields[100],str[512],buf[65536];
+    memset(fields,0,sizeof(fields));
+    n = (*fields_func)(NXTaddr,path,name,fields,scriptp);
+    if ( n > (int)(sizeof(fields)/sizeof(*fields)) )
+    {
+        printf("%s form is too big!! %d\n",name,n);
         return(0);
-    //printf("completed retryassetxfer (%s) AMtxid.%s\n",cJSON_Print(argjson),AMtxid);
-    free_json(argjson);
-    *ptrp = 0;
-    return(1);
-}
-
-//int32_t
-void *Coinloop(void *ptr)
-{
-    int32_t i,coinid,flag,counter = 0;
-    struct daemon_info *cp;
-    struct gateway_info *gp = ptr;
-    struct replicated_coininfo *lp;
-    int64_t height,NXTheight;
-    while ( Historical_done == 0 ) // must process all historical msig addresses and asset transfers
-    {
-        sleep(1);
-        continue;
     }
-    flag = 1;
-    while ( flag != 0 )
+    sprintf(buf,"<b>%s</b>  <br/> <form name=\"%s\" action=\"%s/%s\" method=\"POST\" onsubmit=\"return submitForm(this);\">\n<table>\n",disp,name,url,path);
+    for (i=0; i<n; i++)
     {
-        for (coinid=flag=0; coinid<64; coinid++)
+        if ( fields[i] != 0 )
         {
-            cp = get_daemon_info(coinid);
-            if ( cp == 0 )
-                continue;
-            lp = get_replicated_coininfo(coinid);
-            if ( lp != 0 )
-            {
-                process_pingpong_queue(&lp->genreqs,cp);            // create unique genaddr requests
-                process_pingpong_queue(&lp->genaddr,cp);            // gen multisig addrs for accounts without one
-                flag += queue_size(&lp->genreqs.pingpong[0]) + queue_size(&lp->genreqs.pingpong[0]);
-                flag += queue_size(&lp->genaddr.pingpong[0]) + queue_size(&lp->genaddr.pingpong[0]);
-            }
+            strcat(buf,fields[i]);
+            free(fields[i]);
         }
     }
-    printf("Start coinloop\n");
-    while ( 1 )
+    sprintf(str,"<td colspan=\"2\"> <input type=\"button\" value=\"%s\" onclick=\"click_%s()\" /></td> </tr>\n</table></form>",button,name);
+    if ( (strlen(buf)+strlen(str)) >= sizeof(buf) )
     {
-        for (coinid=0; coinid<64; coinid++)
-        {
-#ifdef DEBUG_MODE
-            if ( coinid != DOGE_COINID )
-                continue;
-#endif
-            cp = get_daemon_info(coinid);
-            lp = get_replicated_coininfo(coinid);
-            if ( lp == 0 )
-                continue;
-            if ( gp->gatewayid >= 0 && cp != 0 ) //NXTheight > lp->NXTheight &&
-            {
-                process_pingpong_queue(&lp->genreqs,cp);            // create unique genaddr requests
-                process_pingpong_queue(&lp->genaddr,cp);            // gen multisig addrs for accounts without one
-            }
-            if ( cp == 0 )
-                gp->initdone[coinid] = 1;
-            if ( gp->initdone[coinid] == 0 && cp != 0 )
-            {
-                height = (*cp->get_blockheight)(cp,coinid);
-                if ( gp->blockheight[coinid] <= (height - gp->min_confirms[coinid] - 1) )
-                {
-                    //printf("historical process %s.%ld\n",coinid_str(coinid),(long)cp->blockheight);
-                    if ( (*cp->add_unique_txids)(cp,coinid,gp->blockheight[coinid],0) == 0 )
-                    {
-                        counter++;
-                        gp->blockheight[coinid]++;
-                    }
-                    continue;
-                }
-                gp->initdone[coinid] = 1;
-                printf("Start RTcoinloop.%s cp->height %ld vs latest %ld\n",coinid_str(coinid),(long)gp->blockheight[coinid],(long)(*cp->get_blockheight)(cp,coinid));
-                for (i=0; i<gp->numinitlist[coinid]; i++)
-                    (*cp->add_unique_txids)(cp,coinid,gp->initlist[coinid][i],0);
-            }
-            NXTheight = Global_mp->NXTheight;
-            if ( NXTheight > lp->NXTheight )
-            {
-                //struct coin_acct *acct = get_coin_acct(DOGE_COINID,"8989816935121514892");
-                //if ( acct != 0 )
-                //    printf("acct.%p withdrawaddr.(%s)\n",acct,acct->withdrawaddr);
-                transfer_assets(coinid);
-            }
-            if ( cp == 0 || gp->blockheight[coinid] <= (height = (*cp->get_blockheight)(cp,coinid)) )
-            {
-#ifndef DEBUG_MODE
-                if ( NXTnetwork_healthy(Global_mp) > 0 )
-#endif
-                {
-                    recalc_balance_info("multigateway",coinid_str(coinid),get_balance_info(coinid));
-                    if ( cp != 0 )
-                    printf("iter RTcoinloop.%s cp->height %ld vs latest %ld | totaldeposits %.8f unspent %.8f\n",coinid_str(coinid),(long)gp->blockheight[coinid],(long)height,dstr(get_unspent_info(coinid)->maxunspent),dstr(get_unspent_info(coinid)->unspent));
-                    if ( cp != 0 && (*cp->add_unique_txids)(cp,coinid,gp->blockheight[coinid],1) == 0 ) // update universe of possible txids
-                        flag = 1;
-                    else flag = 0;
-                    process_pingpong_queue(&lp->retrydepositconfirmed,lp);   // need to wait until add_unique_txids creates xp
-                    //printf("NXTheight.%ld vs cp-> %ld\n",(long)NXTheight,(long)cp->NXTheight);
-                    if ( cp == 0 || gp->blockheight[coinid] == height )
-                    {
-                        if ( cp != 0 )
-                            transfer_assets(coinid);
-                        process_pingpong_queue(&lp->withdrawreqs,lp);   // just wait for MIN_NXTCONFIRMS
-                        process_pingpong_queue(&lp->withdraws,lp);      // get consensus and submit to google_authenticator
-                        process_pingpong_queue(&lp->authenticate,lp);   // if 2FA enabled, do google_authenticator
-                        process_pingpong_queue(&lp->sendcoin,lp);       // submit rawtransaction and publish AM
-                    }
-                    gp->blockheight[coinid] += flag;
-                }
-            }
-            lp->NXTheight = NXTheight;
-            if ( cp == 0 )
-                sleep(10);
-        }
+        printf("yikes! make_form.%s stack smashing???\n",name);
+        return(0);
     }
-    return(0);
-    //return(counter);
+    strcat(buf,str);
+    return(clonestr(buf));
 }
 
-void init_coin_tables(struct daemon_info *cp,int32_t coinid,char *serverA,char *serverB,char *serverC)
+char *gen_handler_forms(char *NXTaddr,char *handler,char *disp,int (*forms_func)(char *NXTaddr,char **forms,char **scriptp))
 {
-    struct gateway_info *gp = Global_gp;
-    struct replicated_coininfo *lp = get_replicated_coininfo(coinid);
-    if ( lp == 0 )
-        return;
-    safecopy(gp->gateways[coinid][0],serverA==0?SERVER_NAMEA:serverA,sizeof(gp->gateways[coinid][0]));
-    safecopy(gp->gateways[coinid][1],serverB==0?SERVER_NAMEB:serverB,sizeof(gp->gateways[coinid][1]));
-    safecopy(gp->gateways[coinid][2],serverC==0?SERVER_NAMEC:serverC,sizeof(gp->gateways[coinid][2]));
-    init_pingpong_queue(&lp->genreqs,"gen depositaddr requests",filter_unique_reqtxids,&lp->genaddr.pingpong[0],&lp->errorqueue);
-    init_pingpong_queue(&lp->genaddr,"call_gen_depositaddr",call_gen_depositaddr,0,&lp->genaddr.pingpong[0]);
+    int i,n;
+    char str[512],body[65536],*forms[100],*scripts[sizeof(forms)/sizeof(*forms)];
+    memset(forms,0,sizeof(forms));
+    memset(scripts,0,sizeof(scripts));
+    n = (*forms_func)(NXTaddr,forms,scripts);
+    if ( n > (int)(sizeof(forms)/sizeof(*forms)) )
+    {
+        printf("%s has too many forms!! %d\n",handler,n);
+        return(0);
+    }
+    strcpy(body,"<script>\n");
+    for (i=0; i<n; i++)
+        if ( scripts[i] != 0 )
+        {
+            strcat(body,scripts[i]);
+            free(scripts[i]);
+        }
+    sprintf(str,"</script>\n\n<body><h3>%s</h3>\n",disp);
+    strcat(body,str);
+    for (i=0; i<n; i++)
+        if ( forms[i] != 0 )
+        {
+            strcat(body,forms[i]);
+            free(forms[i]);
+        }
+    strcat(body,"<hr></body>\n");
+    if ( strlen(body) > sizeof(body) )
+    {
+        printf("yikes! make_form stack smashing???\n");
+        return(0);
+    }
+    return(clonestr(body));
+}
+
+char *construct_varname(char **fields,int n,char *name,char *field,char *disp,int col,int row)
+{
+    char buf[512];
+    fields[n++] = formfield(field,disp,col,row);
+    sprintf(buf,"document.%s.%s.value",name,field);
+    return(clonestr(buf));
+}
+                  
+int gen_list_fields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
+{
+    int n = 0;
+    char script[65536],vars[1024],*title,*type,*descr,*price;
+    title = construct_varname(fields,n++,name,"title","Item Title:",0,0);
+    type = construct_varname(fields,n++,name,"type","Item Type:",0,0);
+    descr = construct_varname(fields,n++,name,"description","Item Description:",60,5);
+    price = construct_varname(fields,n++,name,"price","Item Price (in NXT):",0,0);
+    sprintf(vars,"\"title\":\"' + %s +'\",\"type\":\"' + %s + '\",\"description\":\"' + %s + '\",\"price\":\"' + %s'\"",title,type,descr,price);
+    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",\"listing\":{%s}}';\n}\n",name,handler,name,NXTaddr,vars);
+    *scriptp = clonestr(script);
+    free(title); free(type); free(descr); free(price);
+    return(n);
+}
+
+int gen_listings_fields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
+{
+    int n = 0;
+    char script[65536],vars[1024],*title,*type,*minprice,*maxprice,*seller,*buyer;
+    seller = construct_varname(fields,n++,name,"seller","Only Seller:",0,0);
+    buyer = construct_varname(fields,n++,name,"buyer","Only Buyer:",0,0);
+    title = construct_varname(fields,n++,name,"title","Only Title:",0,0);
+    type = construct_varname(fields,n++,name,"type","Only Type:",0,0);
+    minprice = construct_varname(fields,n++,name,"minprice","Min Price (in NXT):",0,0);
+    maxprice = construct_varname(fields,n++,name,"maxprice","Max Price (in NXT):",0,0);
+    sprintf(vars,"\"seller\":\"' + %s +'\",\"buyer\":\"' + %s +'\",\"title\":\"' + %s +'\",\"type\":\"' + %s + '\",\"minprice\":\"' + %s + '\",\"maxprice\":\"' + %s'\"",seller,buyer,title,type,minprice,maxprice);
+    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",\"filters\":{%s}}';\n}\n",name,handler,name,NXTaddr,vars);
+    *scriptp = clonestr(script);
+    free(seller); free(buyer); free(title); free(type); free(minprice); free(maxprice);
+    return(n);
+}
+
+int gen_changeurl_fields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
+{
+    int n = 0;
+    char script[65536],vars[1024],*url;
+    url = construct_varname(fields,n++,name,"changeurl","Change location of NXTprotocol.html",0,0);
+    sprintf(vars,"\"URL\":\"' + %s'\"",url);
+    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",%s}';\n}\n",name,handler,name,vars);
+    *scriptp = clonestr(script);
+    free(url);
+    return(n);
+}
+
+int gen_listingid_field(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
+{
+    int n = 0;
+    char script[65536],vars[1024],*listingid;
+    listingid = construct_varname(fields,n++,name,"listingid","Listing ID:",0,0);
+    sprintf(vars,"\"listingid\":\"' + %s'\"",listingid);
+    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",%s}';\n}\n",name,handler,name,NXTaddr,vars);
+    *scriptp = clonestr(script);
+    free(listingid);
+    return(n);
+}
+
+int gen_acceptoffer_fields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
+{
+    int n = 0;
+    char script[65536],vars[1024],*listingid,*buyer;
+    listingid = construct_varname(fields,n++,name,"listingid","Listing ID:",0,0);
+    buyer = construct_varname(fields,n++,name,"buyer","NXT address:",0,0);
+    sprintf(vars,"\"listingid\":\"' + %s +'\",\"buyer\":\"' + %s'\"",listingid,buyer);
+    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",%s}';\n}\n",name,handler,name,NXTaddr,vars);
+    *scriptp = clonestr(script);
+    free(listingid); free(buyer);
+    return(n);
+}
+
+int gen_makeoffer_fields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
+{
+    int n = 0;
+    char script[65536],vars[1024],*listingid,*bid;
+    listingid = construct_varname(fields,n++,name,"listingid","Listing ID:",0,0);
+    bid = construct_varname(fields,n++,name,"bid","comments:",30,5);
+    sprintf(vars,"\"listingid\":\"' + %s +'\",\"bid\":\"' + %s'\"",listingid,bid);
+    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",%s}';\n}\n",name,handler,name,NXTaddr,vars);
+    *scriptp = clonestr(script);
+    free(listingid); free(bid);
+    return(n);
+}
+
+int gen_feedback_fields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
+{
+    int n = 0;
+    char script[65536],vars[1024],*listingid,*rating,*aboutbuyer,*aboutseller;
+    listingid = construct_varname(fields,n++,name,"listingid","Listing ID:",0,0);
+    rating = construct_varname(fields,n++,name,"rating","Rating:",0,0);
+    aboutbuyer = construct_varname(fields,n++,name,"aboutbuyer","Feedback about buyer:",30,5);
+    aboutseller = construct_varname(fields,n++,name,"aboutseller","Feedback about seller:",30,5);
+    sprintf(vars,"\"listingid\":\"' + %s +'\",\"rating\":\"' + %s +'\",\"aboutbuyer\":\"' + %s +'\",\"aboutseller\":\"' + %s'\"",listingid,rating,aboutbuyer,aboutseller);
+    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",%s}';\n}\n",name,handler,name,NXTaddr,vars);
+    *scriptp = clonestr(script);
+    free(listingid); free(rating); free(aboutbuyer); free(aboutseller);
+    return(n);
+}
+
+int NXTorrent_forms(char *NXTaddr,char **forms,char **scripts)
+{
+    int n = 0;
+    forms[n] = make_form(NXTaddr,&scripts[n],"changeurl","Change this websockets default page","change","127.0.0.1:7777","NXTorrent",gen_changeurl_fields);
+    n++;
+    forms[n] = make_form(NXTaddr,&scripts[n],"list","Post an Item for Sale: ","List this item","127.0.0.1:7777","NXTorrent",gen_list_fields);
+    n++;
+    forms[n] = make_form(NXTaddr,&scripts[n],"status","Display Listing ID:","display","127.0.0.1:7777","NXTorrent",gen_listingid_field);
+    n++;
+    forms[n] = make_form(NXTaddr,&scripts[n],"listings","Search Listings:","search","127.0.0.1:7777","NXTorrent",gen_listings_fields);
+    n++;
+    forms[n] = make_form(NXTaddr,&scripts[n],"cancel","Cancel Listing ID:","cancel listing","127.0.0.1:7777","NXTorrent",gen_listingid_field);
+    n++;
+    forms[n] = make_form(NXTaddr,&scripts[n],"acceptoffer","Accept Offer for Listing ID:","accept offer","127.0.0.1:7777","NXTorrent",gen_acceptoffer_fields);
+    n++;
+    forms[n] = make_form(NXTaddr,&scripts[n],"makeoffer","Make Offer for Listing ID:","make offer","127.0.0.1:7777","NXTorrent",gen_makeoffer_fields);
+    n++;
+    forms[n] = make_form(NXTaddr,&scripts[n],"feedback","Feedback for Listing ID:","send feedback","127.0.0.1:7777","NXTorrent",gen_feedback_fields);
+    n++;
+    return(n);
+}
+
+char *gen_coinacct_line(char *buf,int32_t coinid,uint64_t nxt64bits,char *NXTaddr)
+{
+    char *withdraw,*deposit,*str;
+    deposit = get_deposit_addr(coinid,NXTaddr);
+    if ( deposit == 0 || deposit[0] == 0 )
+        deposit = "<no deposit address>";
+    withdraw = find_user_withdrawaddr(coinid,nxt64bits);
+    if ( withdraw == 0 || withdraw[0] == 0 )
+    {
+        str = "set";
+        withdraw = "<no withdraw address>";
+    } else str = "change";
+    sprintf(buf,"deposit %4s -> (%s)<br/> %s %s withdraw address %s ->",coinid_str(coinid),deposit,str,coinid_str(coinid),withdraw);
+    return(buf);
+}
+
+int gen_register_fields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
+{
+    int n = 0;
+    uint64_t nxt64bits;
+    char script[65536],vars[1024],buf[512],*btc,*ltc,*doge,*cgb,*drk;
+    nxt64bits = calc_nxt64bits(NXTaddr);
+    btc = construct_varname(fields,n++,name,"btc",gen_coinacct_line(buf,BTC_COINID,nxt64bits,NXTaddr),60,1);
+    ltc = construct_varname(fields,n++,name,"ltc",gen_coinacct_line(buf,LTC_COINID,nxt64bits,NXTaddr),60,1);
+    doge = construct_varname(fields,n++,name,"doge",gen_coinacct_line(buf,DOGE_COINID,nxt64bits,NXTaddr),60,1);
+    drk = construct_varname(fields,n++,name,"drk",gen_coinacct_line(buf,DRK_COINID,nxt64bits,NXTaddr),60,1);
+    cgb = construct_varname(fields,n++,name,"cgb",gen_coinacct_line(buf,CGB_COINID,nxt64bits,NXTaddr),60,1);
+    sprintf(vars,"\"BTC\":\"' + %s +'\",\"LTC\":\"' + %s + '\",\"DOGE\":\"' + %s + '\",\"DRK\":\"' + %s + '\",\"CGB\":\"' + %s'\"",btc,ltc,doge,drk,cgb);
+    //printf("vars.(%s)\n",vars);
+    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",\"coins\":{%s}}';\n}\n",name,handler,name,NXTaddr,vars);
+    *scriptp = clonestr(script);
+    free(btc); free(ltc); free(doge); free(drk); free(cgb);
+    return(n);
+}
+
+int gen_dispNXTacct_fields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
+{
+    int n = 0;
+    char script[65536],vars[1024],*coin,*assetid;
+    coin = construct_varname(fields,n++,name,"coin","Specify coin:",0,0);
+    assetid = construct_varname(fields,n++,name,"assetid","Specify assetid:",0,0);
+    sprintf(vars,"\"coin\":\"' + %s +'\",\"assetid\":\"' + %s'\"",coin,assetid);
+    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",%s}';\n}\n",name,handler,name,NXTaddr,vars);
+    *scriptp = clonestr(script);
+    free(coin); free(assetid);
+    return(n);
+}
+
+int gen_dispcoininfo_fields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
+{
+    int n = 0;
+    char script[65536],vars[1024],*coin,*nxtacct;
+    coin = construct_varname(fields,n++,name,"coin","Specify coin:",0,0);
+    nxtacct = construct_varname(fields,n++,name,"nxtacct","Specify NXTaddr (blank for all):",0,0);
+    sprintf(vars,"\"coin\":\"' + %s +'\",\"assetid\":\"' + %s'\"",coin,nxtacct);
+    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",%s}';\n}\n",name,handler,name,NXTaddr,vars);
+    *scriptp = clonestr(script);
+    free(coin); free(nxtacct);
+    return(n);
+}
+
+int gen_redeem_fields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
+{
+    int n = 0;
+    char script[65536],vars[1024],*coin,*amount,*destaddr,*InstantDEX;
+    coin = construct_varname(fields,n++,name,"coin","Specify coin:",0,0);
+    amount = construct_varname(fields,n++,name,"amount","Specify withdrawal amount:",0,0);
+    destaddr = construct_varname(fields,n++,name,"destaddr","Specify destination address (blank to use registered):",60,1);
+    InstantDEX = construct_varname(fields,n++,name,"InstantDEX","Specify amount for InstantDEX:",0,0);
+    sprintf(vars,"\"redeem\":\"' + %s +'\",\"withdrawaddr\":\"' + %s +'\",\"InstantDEX\":\"' + %s'\"",coin,destaddr,InstantDEX);
+    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",\"coin\":\"' + %s +'\",\"amount\":\"' + %s +'\",\"comment\":{%s}}';\n}\n",name,handler,name,NXTaddr,coin,amount,vars);
+    *scriptp = clonestr(script);
+    free(coin); free(amount); free(destaddr); free(InstantDEX);
+    return(n);
+}
+
+int multigateway_forms(char *NXTaddr,char **forms,char **scripts)
+{
+    int coinid,n = 0;
+    char buf[512],*str;
+    int64_t quantity,unconfirmed;
+    sprintf(buf,"NXT address %s (NXT %.8f) ",NXTaddr,dstr(issue_getBalance(NXTaddr)));
+    for (coinid=0; coinid<64; coinid++)
+    {
+        str = coinid_str(coinid);
+        if ( strcmp(str,ILLEGAL_COIN) != 0 )
+        {
+            quantity = get_coin_quantity(&unconfirmed,coinid,NXTaddr);
+            if ( quantity != 0 || unconfirmed != 0 )
+                sprintf(buf+strlen(buf),"(%s %.8f pend %.8f) ",str,dstr(quantity),dstr(unconfirmed));
+        }
+    }
+    strcat(buf,"<br/><br/>\n");
+    //forms[n++] = clonestr(buf);
+    forms[n] = make_form(NXTaddr,&scripts[n],"changeurl","Change this websockets default page","change","127.0.0.1:7777","multigateway",gen_changeurl_fields);
+    n++;
+    forms[n] = make_form(NXTaddr,&scripts[n],"genDepositaddrs","Update coin addresses","submit","127.0.0.1:7777","multigateway",gen_register_fields);
+    n++;
+    forms[n] = make_form(NXTaddr,&scripts[n],"dispNXTacct","Display account details","display","127.0.0.1:7777","multigateway",gen_dispNXTacct_fields);
+    n++;
+    forms[n] = make_form(NXTaddr,&scripts[n],"dispcoininfo","Display coin details","display","127.0.0.1:7777","multigateway",gen_dispcoininfo_fields);
+    n++;
+    forms[n] = make_form(NXTaddr,&scripts[n],"redeem","Redeem NXT Asset -> coin","withdraw","127.0.0.1:7777","multigateway",gen_redeem_fields);
+    n++;
+    return(n);
+}
+
+//static char *subatomic_trade[] = { (char *)subatomic_trade_func, "trade", "", "NXT", "coin", "amount", "coinaddr", "otherNXT", "othercoin", "otheramount", "othercoinaddr", "pubkey", "otherpubkey", 0 };
+//var listingTitle = document.listingValues.listingTitle.value;
+//var listingCategory = document.listingValues.listingCategory.value;
+//var listingCategory2 = document.listingValues.listingCategory2.value;
+//var listingCategory3 = document.listingValues.listingCategory3.value;
+//var listingDescription = document.listingValues.listingDescription.value;
+//var listingPrice = document.listingValues.listingPrice.value;
+
+int gen_subatomic_tradefields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
+{
+    int n = 0;
+    char script[65536],vars[1024],*destNXT,*coin,*amount,*coinaddr,*destcoin,*destamount,*destcoinaddr;//,*senderip;
+    //senderip = construct_varname(fields,n++,name,"senderip","your IP address:",0,0);
+
+    coin = construct_varname(fields,n++,name,"coin","source coin or NXT for atomic swap:",0,0);
+    amount = construct_varname(fields,n++,name,"amount","source amount:",0,0);
+    coinaddr = construct_varname(fields,n++,name,"coinaddr","source coinaddress or signed txbytes:",60,5);
+
+    destcoin = construct_varname(fields,n++,name,"destcoin","dest coin or NXT for atomic swap:",0,0);
+    destamount = construct_varname(fields,n++,name,"destamount","dest amount:",0,0);
+    destcoinaddr = construct_varname(fields,n++,name,"destcoinaddr","dest coinaddress or unsigned txbytes:",60,5);
+
+    destNXT = construct_varname(fields,n++,name,"destNXT","NXT address you are trading with:",0,0);
+    sprintf(script,"function click_%s()\n{\nvar A = %s; B = %s; C = %s; D = %s; E = %s; F = %s; G = %s;\n",name,coin,amount,coinaddr,destNXT,destcoin,destamount,destcoinaddr);
+    sprintf(vars,"\"coinaddr\":\"' + C + '\",\"destNXT\":\"' + D + '\",\"destcoin\":\"' + E + '\",\"destamount\":\"' + F + '\",\"destcoinaddr\":\"' + G + '\"");
+    sprintf(script+strlen(script),"location.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",\"coin\":\"' + A + '\",\"amount\":\"' + B + '\",%s}';\n}\n",handler,name,NXTaddr,vars);
+    *scriptp = clonestr(script);
+    free(coin); free(amount); free(coinaddr);
+    free(destNXT); free(destcoin); free(destamount); free(destcoinaddr);
+    return(n);
+}
+
+int gen_subatomic_statusfields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
+{
+    int n = 0;
+    char script[65536];//,vars[1024],*listingid;
+   // listingid = construct_varname(fields,n++,name,"listingid","Listing ID:",0,0);
+    //sprintf(vars,"\"listingid\":\"' + %s +'\"",listingid);
+    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\"}';\n}\n",name,handler,name,NXTaddr);
+    *scriptp = clonestr(script);
+   // free(listingid);
+    return(n);
+}
+
+int gen_subatomic_cancelfields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
+{
+    int n = 0;
+    char script[65536];//,vars[1024],*listingid;
+    // listingid = construct_varname(fields,n++,name,"listingid","Listing ID:",0,0);
+    //sprintf(vars,"\"listingid\":\"' + %s +'\"",listingid);
+    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\"}';\n}\n",name,handler,name,NXTaddr);
+    *scriptp = clonestr(script);
+    // free(listingid);
+    return(n);
+}
+
+int subatomic_forms(char *NXTaddr,char **forms,char **scripts)
+{
+    int n = 0;
+    forms[n] = make_form(NXTaddr,&scripts[n],"subatomic_trade","Subatomic crypto trade or NXT Atomic swap","exchange","127.0.0.1:7777","subatomic",gen_subatomic_tradefields);
+    n++;
+    forms[n] = make_form(NXTaddr,&scripts[n],"subatomic_status","Subatomic status","display","127.0.0.1:7777","subatomic",gen_subatomic_statusfields);
+    n++;
+    forms[n] = make_form(NXTaddr,&scripts[n],"subatomic_cancel","Cancel Subatomic trade","cancel","127.0.0.1:7777","subatomic",gen_subatomic_cancelfields);
+    n++;
+    return(n);
+}
+
+
+char *teststr = "<!DOCTYPE html>\
+<html>\
+<head>\
+<meta charset=\"UTF-8\"/>\
+<title>NXTprotocol dev GUI</title>\
+<article>\
+<section class=\"browser\">NXTprotocol detected Browser: <div id=brow>...</div></section><BR><BR>\
+<section id=\"increment\" class=\"group2\">\
+<table>\
+<input type=button id=offset value=\"status\" onclick=\"click_subatomic_status();\" >\
+<input type=button id=offset value=\"cancel\" onclick=\"click_subatomic_cancel();\" >\
+<BR><BR>\
+<div id=number> </div>\
+<td>Your websocket connection status:</td>\
+<td id=wsdi_statustd align=center class=\"explain\"><div id=wsdi_status>Not initialized</div></td>\
+<BR>\
+</table>\
+</td></tr></table>\
+</section>\
+</article>\
+<script>\
+var pos = 0;\
+function get_appropriate_ws_url()\
+{\
+    var pcol;\
+    var u = document.URL;\
+    if (u.substring(0, 5) == \"https\") {\
+        pcol = \"wss://\";\
+        u = u.substr(8);\
+    } else {\
+        pcol = \"ws://\";\
+        if (u.substring(0, 4) == \"http\")\
+            u = u.substr(7);\
+    }\
+    u = u.split('/');\
+    return pcol + u[0] + \"/xxx\";\
+}\
+\
+document.getElementById(\"number\").textContent = get_appropriate_ws_url();\
+var socket_di;\
+if (typeof MozWebSocket != \"undefined\") {\
+    socket_di = new MozWebSocket(get_appropriate_ws_url(),\
+                                 \"dumb-increment-protocol\");\
+} else {\
+    socket_di = new WebSocket(get_appropriate_ws_url(),\
+                              \"dumb-increment-protocol\");\
+}\
+try {\
+    socket_di.onopen = function() {\
+        document.getElementById(\"wsdi_statustd\").style.backgroundColor = \"#40ff40\";\
+        document.getElementById(\"wsdi_status\").textContent = \"OPEN\";\
+    }\
+    socket_di.onmessage =function got_packet(msg) {\
+        document.getElementById(\"number\").textContent = msg.data + \"\n\";\
+    }\
+    socket_di.onclose = function(){\
+        document.getElementById(\"wsdi_statustd\").style.backgroundColor = \"#ff4040\";\
+        document.getElementById(\"wsdi_status\").textContent = \"CLOSED\";\
+    }\
+    } catch(exception) {\
+        alert('<p>Error' + exception);\
+    }\
+    </script>\
+    </head>";
     
-    init_pingpong_queue(&lp->retrydepositconfirmed,"retrydepositconfirmed",retrydepositconfirmed,0,0);
+void gen_testforms()
+{
+    char *str;
+    sprintf(testforms,"%s<br/><b>%s<br/> %s<br/>NXT.%s balance %.8f %s</b><br/>\n",teststr,Global_mp->dispname,PC_USERNAME[0]!=0?PC_USERNAME:"setAccountInfo on http://127.0.0.1:6876/test description={\"username\":\"your pc username\"}",Global_mp->NXTADDR,dstr(Global_mp->acctbalance),Global_mp->acctbalance == 0?"<- need to send NXT":"");
+    str = gen_handler_forms(Global_mp->NXTADDR,"subatomic","subatomic API test forms",subatomic_forms);
+    strcat(testforms,str);
+    free(str);
+    str = gen_handler_forms(Global_mp->NXTADDR,"NXTorrent","NXTorrent API test forms",NXTorrent_forms);
+    strcat(testforms,str);
+    free(str);
+    str = gen_handler_forms(Global_mp->NXTADDR,"multigateway","multigateway API test forms",multigateway_forms);
+    strcat(testforms,str);
+    free(str);
+    strcat(testforms,"</html>\n");
     
-    init_pingpong_queue(&lp->withdrawreqs,"wait_for_NXTconfirms",wait_for_NXTconfirms,&lp->withdraws.pingpong[0],0);
-    init_pingpong_queue(&lp->withdraws,"process_withdraws",process_withdraws,&lp->authenticate.pingpong[0],0);
-    init_pingpong_queue(&lp->authenticate,"google authenticator",google_authenticator,&lp->sendcoin.pingpong[0],0);
-    init_pingpong_queue(&lp->sendcoin,"send coin",sendcoin,0,0);
-    
-    if ( gp->userpass[coinid] != 0 && gp->userpass[coinid][0] != 0 )
-    {
-        cp->validate_coinaddr = validate_coinaddr;
-        cp->get_blockheight = get_blockheight;
-        cp->add_unique_txids = add_bitcoind_uniquetxids;
-        cp->calc_rawtransaction = calc_rawtransaction;
-        
-        cp->gen_depositaddr = gen_depositaddr;
-        cp->submit_withdraw = submit_withdraw;
-    }
 }
-
-int32_t init_multigateway(struct NXThandler_info *mp,struct gateway_info *gp)
-{
-    struct req_deposit *rp = 0;
-    struct withdraw_info *wp = 0;
-    struct coin_txid *tp = 0;
-    int32_t i,coinid;
-    struct replicated_coininfo *lp;
-    static char *whitelist[NUM_GATEWAYS+1];
-    struct daemon_info *cp;
-    char *ipaddr,*coins[] = { "DOGE", "BTC", "LTC", ""};//"DRK", "" }; //"PPC","CGB",
-    static int64_t variant;
-    printf("call init_multigateway gatewayid.%d\n",gp->gatewayid);
-    ipaddr = get_ipaddr();
-    printf("IPaddr.(%s)\n",ipaddr);
-    // need a bit of work to allow random selection of 3 servers out of a larger set, for now just harded coded to three servers
-    for (i=0; coins[i][0]!=0; i++)
-    {
-        coinid = conv_coinstr(coins[i]);
-        if ( coinid >= 0 )
-        {
-            cp = init_daemon_info(Global_gp,coins[i],0,0,0);
-            printf("coinid.%d %s cp.%p\n",coinid,coins[i],cp);
-            if ( cp != 0 )
-            {
-                cp->coinid = coinid;
-                init_coin_tables(cp,coinid,Server_names[0],Server_names[1],Server_names[2]);
-                gp->daemons[coinid] = cp;
-                printf("Start %s height %ld\n",coinid_str(coinid),(long)(*cp->get_blockheight)(cp,coinid));
-            }
-            lp = get_replicated_coininfo(coinid);
-            if ( lp == 0 )
-                continue;
-            lp->genaddr_txids = hashtable_create("genaddr_txids",HASHTABLES_STARTSIZE,sizeof(*rp),((long)&rp->NXTaddr[0] - (long)rp),sizeof(rp->NXTaddr),((long)&rp->modified - (long)rp));
-            lp->coin_txids = hashtable_create("coin_txids",HASHTABLES_STARTSIZE,sizeof(*tp),((long)&tp->txid[0] - (long)tp),sizeof(tp->txid),((long)&tp->modified - (long)tp));
-            lp->redeemtxids = hashtable_create("redeemtxids",HASHTABLES_STARTSIZE,sizeof(*wp),((long)&wp->redeemtxid[0] - (long)wp),sizeof(wp->redeemtxid),((long)&wp->modified - (long)wp));
-            //gp->coin_values = hashtable_create("coin_values",HASHTABLES_STARTSIZE,sizeof(*vp),((long)&vp->coinaddr[0] - (long)vp),sizeof(vp->coinaddr),((long)&vp->modified - (long)vp));
-        }
-    }
-    if ( gp->gatewayid >= 0 )
-    {
-        for (i=0; i<NUM_GATEWAYS; i++)
-        {
-            gp->wdsocks[i] = -1;
-            gp->gensocks[i] = -1;
-            whitelist[i] = Server_names[i];
-        }
-        whitelist[i] = 0;
-        variant = MULTIGATEWAY_VARIANT;
-        register_variant_handler(MULTIGATEWAY_VARIANT,process_directnet_syncwithdraw,MULTIGATEWAY_SYNCWITHDRAW,sizeof(struct withdraw_info),sizeof(struct withdraw_info),whitelist);
-        register_variant_handler(MULTIGATEWAY_VARIANT,process_directnet_getpubkey,MULTIGATEWAY_GETCOINADDR,sizeof(struct directnet_getpubkey),sizeof(struct directnet_getpubkey),whitelist);
-        register_variant_handler(MULTIGATEWAY_VARIANT,process_directnet_getpubkey,MULTIGATEWAY_GETPUBKEY,sizeof(struct directnet_getpubkey),sizeof(struct directnet_getpubkey),whitelist);
-        if ( pthread_create(malloc(sizeof(pthread_t)),NULL,_server_loop,&variant) != 0 )
-            printf("ERROR _server_loop\n");
-    }
-    if ( SUPPRESS_MULTIGATEWAY == 0 && pthread_create(malloc(sizeof(pthread_t)),NULL,Coinloop,gp) != 0 )
-        printf("ERROR Coin_genaddrloop\n");
-    return(1);
-}
-
-char *dispNXTacct_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
-{
-    int32_t created,coinid;
-    struct NXT_acct *np;
-    struct coin_acct *acct;
-    char coinname[64],NXTaddr[64],assetid[64];
-    //printf("dispNXTacct_func.(%s) numobjs.%d\n",sender,numobjs);
-    copy_cJSON(NXTaddr,objs[0]);
-    if ( NXTaddr[0] != 0 )
-    {
-        copy_cJSON(coinname,objs[1]);
-        copy_cJSON(assetid,objs[2]);
-        if ( coinname[0] == 0 )
-        {
-            np = get_NXTacct(&created,Global_mp,NXTaddr);
-            if ( np != 0 )
-                return(cJSON_Print(gen_NXTacct_json(np,0,assetid[0]==0?0:assetid)));
-        }
-        else
-        {
-            coinid = conv_coinstr(coinname);
-            if ( coinid >= 0 )
-            {
-                acct = get_coin_acct(coinid,NXTaddr);
-                if ( acct != 0 )
-                    return(cJSON_Print(gen_coinacct_json(acct,NXTaddr)));
-                else printf("couldnt get account for NXT.%s %s coinid.%d\n",NXTaddr,coinname,coinid);
-            } else printf("dispNXTacct_func (%s) -> %d\n",coinname,coinid);
-        }
-    }
-    return(0);
-}
-
-
-char *dispcoininfo_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
-{
-    int32_t created,coinid;
-    struct NXT_acct *np;
-    struct coin_acct *acct;
-    char coinname[64],NXTaddr[64],nxtaddr[64];
-    //printf("dispNXTacct_func.(%s) numobjs.%d\n",sender,numobjs);
-    copy_cJSON(NXTaddr,objs[0]);
-    if ( NXTaddr[0] != 0 )
-    {
-        copy_cJSON(coinname,objs[1]);
-        copy_cJSON(nxtaddr,objs[2]);
-        if ( coinname[0] == 0 )
-        {
-            np = get_NXTacct(&created,Global_mp,NXTaddr);
-            if ( np != 0 )
-                return(cJSON_Print(gen_NXTacct_json(np,0,0)));
-        }
-        else
-        {
-            coinid = conv_coinstr(coinname);
-            if ( coinid >= 0 )
-            {
-                acct = get_coin_acct(coinid,NXTaddr);
-                if ( acct != 0 )
-                    return(cJSON_Print(gen_coinacct_json(acct,nxtaddr)));
-                else printf("couldnt get account for NXT.%s %s coinid.%d\n",nxtaddr,coinname,coinid);
-            } else printf("dispNXTacct_func (%s) -> %d\n",coinname,coinid);
-        }
-    }
-    return(0);
-}
-
-char *genDepositaddrs_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
-{
-    cJSON *json;
-    char coinsjsontxt[64],NXTaddr[64],*retstr = 0;
-    printf("sender.%s valid.%d\n",sender,valid);
-    copy_cJSON(NXTaddr,objs[0]);
-    copy_cJSON(coinsjsontxt,objs[1]);
-    if ( NXTaddr[0] != 0 )
-    {
-        retstr = AM_get_coindeposit_address(GATEWAY_SIG,Global_mp->timestamp,NXTaddr,coinsjsontxt);
-        if ( retstr != 0 )
-        {
-            json = cJSON_CreateObject();
-            cJSON_AddItemToObject(json,"result",cJSON_CreateString("good"));
-            cJSON_AddItemToObject(json,"AMtxid",cJSON_CreateString(retstr));
-            free(retstr);
-            retstr = cJSON_Print(json);
-            free_json(json);
-        }
-    }
-    return(retstr);
-}
-
-char *redeem_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
-{
-//http://127.0.0.1:7777/multigateway?[{"requestType":"redeem","NXT":"8989816935121514892","coin":"DOGE","amount":"1.123","comment":{"redeem":"DOGE"}},{"token":"d79fth95u83cu087m4js5pr7oqktvg537dctmf7sclmv3thqn2q7sbpgasdbego0a31ue2g4tunv5v3sr66fmdrhd1rptnc7qtl38bplvdug1udpmkibjhqp7kb2vhd6svvar4fdioum4otoo2i9jhj97fboibne"}]
-    cJSON *json;
-    int32_t coinid,deadline = 666;
-    uint64_t redeemtxid,amount;
-    char coinname[64],NXTaddr[64],numstr[512],comment[1024],cmd[4096],*str,*retstr = 0;
-    copy_cJSON(NXTaddr,objs[0]);
-    copy_cJSON(coinname,objs[1]);
-    copy_cJSON(numstr,objs[2]);
-    copy_cJSON(comment,objs[3]);
-    stripwhite(comment,strlen(comment));
-    coinid = conv_coinstr(coinname);
-    amount = (uint64_t)(atof(numstr) * SATOSHIDEN);
-    str = assetid_str(coinid);
-    printf("sender.%s valid.%d: NXT.%s %d.(%s) %s (%s)=%.8f (%s)\n",sender,valid,NXTaddr,coinid,coinname,str,numstr,dstr(amount),comment);
-    if ( NXTaddr[0] != 0 && coinid >= 0 && amount > 0 )
-    {
-        sprintf(cmd,"%s=transferAsset&secretPhrase=%s&recipient=%s&asset=%s&quantityQNT=%ld&feeNQT=%ld&deadline=%d&comment=%s",NXTSERVER,Global_mp->NXTACCTSECRET,NXTISSUERACCT,str,(long)amount,(long)MIN_NQTFEE,deadline,comment);
-        retstr = issue_curl(cmd);
-        if ( retstr != 0 )
-        {
-            json = cJSON_Parse(retstr);
-            if ( json != 0 )
-            {
-                redeemtxid = get_satoshi_obj(json,"transaction");
-                if ( redeemtxid == 0 )
-                {
-                    str = cJSON_Print(json);
-                    printf("ERROR WITH ASSET TRANSFER.(%s) -> \n%s\n",cmd,str);
-                    free(str);
-                }
-                else printf("got txid.%ld %s\n",(unsigned long)redeemtxid,nxt64str(redeemtxid));
-                free_json(json);
-            } else printf("error issuing asset.(%s) -> %s\n",cmd,retstr);
-        }
-        else printf("error redeeming transfer\n");
-    }
-    return(retstr);
-}
-
-char *multigateway_json_commands(struct NXThandler_info *mp,struct gateway_info *gp,cJSON *argjson,char *sender,int32_t valid)
-{
-    //http://127.0.0.1:7777/multigateway?[{%22requestType%22:%22genDepositaddrs%22,%22NXT%22:%2211445347041779652448%22,%22coins%22:{%22DOGE%22:%22DNyEii2mnvVL1BM1kTZkmKDcf8SFyqAX4Z%22}},{%22token%22:%22bd855r204lqfskfg4que97uef8sh2blnh7ol9mcq2mmee1i2lu3a2ftnpqudlto04kqa15gpc14hu6c1dvs1p0vfjbkha5q423lqo8fbf5k0ketomirtkvveefqib5r03bl2pk2i3ju48dl7k4bpcqfehppch81h%22}]
-    static char *changeurl[] = { (char *)changeurl_func, "changeurl", "", "URL", 0 };
-    static char *genDepositaddrs[] = { (char *)genDepositaddrs_func, "genDepositaddrs", "V", "NXT", "coins", 0 };
-    static char *dispNXTacct[] = { (char *)dispNXTacct_func, "dispNXTacct", "", "NXT", "coin", "assetid", 0 };
-    static char *dispcoininfo[] = { (char *)dispNXTacct_func, "dispcoininfo", "", "NXT", "coin", "nxtaddr", 0 };
-    static char *redeem[] = { (char *)redeem_func, "redeem", "V", "NXT", "coin", "amount", "comment", 0 };
-    static char **commands[] = { dispNXTacct, genDepositaddrs, dispcoininfo, redeem, changeurl };
-    int32_t i,j;
-    cJSON *obj,*nxtobj,*objs[8];
-    char NXTaddr[64],command[4096],**cmdinfo;
-    memset(objs,0,sizeof(objs));
-    command[0] = 0;
-    memset(NXTaddr,0,sizeof(NXTaddr));
-    if ( argjson != 0 )
-    {
-        obj = cJSON_GetObjectItem(argjson,"requestType");
-        nxtobj = cJSON_GetObjectItem(argjson,"NXT");
-        copy_cJSON(NXTaddr,nxtobj);
-        copy_cJSON(command,obj);
-        //printf("(%s) command.(%s) NXT.(%s)\n",cJSON_Print(argjson),command,NXTaddr);
-    }
-    //printf("multigateway_json_commands sender.(%s) valid.%d\n",sender,valid);
-    for (i=0; i<(int32_t)(sizeof(commands)/sizeof(*commands)); i++)
-    {
-        cmdinfo = commands[i];
-        printf("needvalid.(%c) sender.(%s) valid.%d %d of %d: cmd.(%s) vs command.(%s)\n",cmdinfo[2][0],sender,valid,i,(int32_t)(sizeof(commands)/sizeof(*commands)),cmdinfo[1],command);
-        if ( strcmp(cmdinfo[1],command) == 0 )
-        {
-            if ( cmdinfo[2][0] != 0 )
-            {
-                if ( sender[0] == 0 || valid != 1 || strcmp(NXTaddr,sender) != 0 )
-                {
-                    printf("verification valid.%d missing for %s sender.(%s) vs NXT.(%s)\n",valid,cmdinfo[1],NXTaddr,sender);
-                    return(0);
-                }
-            }
-            for (j=3; cmdinfo[j]!=0&&j<3+(int32_t)(sizeof(objs)/sizeof(*objs)); j++)
-                objs[j-3] = cJSON_GetObjectItem(argjson,cmdinfo[j]);
-            return((*(json_handler)cmdinfo[0])(sender,valid,objs,j-3));
-        }
-    }
-    return(0);
-}
-
-char *multigateway_jsonhandler(cJSON *argjson)
-{
-    struct NXThandler_info *mp = Global_mp;
-    struct gateway_info *gp = Global_gp;
-    long len;
-    int32_t valid;
-    cJSON *json,*obj,*tokenobj,*secondobj,*parmsobj = 0;
-    char sender[64],*parmstxt=0,encoded[NXT_TOKEN_LEN+1],*retstr = 0;
-    sender[0] = 0;
-    valid = -1;
-   // printf("multigateway_jsonhandler argjson.%p\n",argjson);
-    if ( argjson != 0 )
-    {
-        parmstxt = cJSON_Print(argjson);
-        len = strlen(parmstxt);
-        stripwhite(parmstxt,len);
-    }
-    if ( argjson == 0 )
-    {
-        json = cJSON_CreateObject();
-        obj = cJSON_CreateNumber(gp->gatewayid); cJSON_AddItemToObject(json,"gatewayid",obj);
-        obj = cJSON_CreateString(mp->NXTADDR); cJSON_AddItemToObject(json,"NXTaddr",obj);
-        obj = cJSON_CreateString(mp->ipaddr); cJSON_AddItemToObject(json,"ipaddr",obj);
-        obj = gen_NXTaccts_json(0);
-        if ( obj != 0 )
-            cJSON_AddItemToObject(json,"NXTaccts",obj);
-        obj = gen_coins_json(0);
-        if ( obj != 0 )
-            cJSON_AddItemToObject(json,"coins",obj);
-        retstr = cJSON_Print(json);
-        free_json(json);
-        return(retstr);
-    }
-    else if ( (argjson->type&0xff) == cJSON_Array && cJSON_GetArraySize(argjson) == 2 )
-    {
-        parmsobj = cJSON_GetArrayItem(argjson,0);
-        if ( parmstxt != 0 )
-            free(parmstxt);
-        parmstxt = cJSON_Print(parmsobj);
-        len = strlen(parmstxt);
-        stripwhite(parmstxt,len);
-
-        secondobj = cJSON_GetArrayItem(argjson,1);
-        tokenobj = cJSON_GetObjectItem(secondobj,"token");
-        copy_cJSON(encoded,tokenobj);
-        //printf("website.(%s) encoded.(%s) len.%ld\n",parmstxt,encoded,strlen(encoded));
-        if ( strlen(encoded) == NXT_TOKEN_LEN )
-            issue_decodeToken(sender,&valid,parmstxt,encoded);
-        argjson = parmsobj;
-    }
-    retstr = multigateway_json_commands(mp,gp,argjson,sender,valid);
-#ifdef DEBUG_MODE
-    if ( retstr == 0 && argjson != 0 && argjson != parmsobj )
-    {
-        char buf[1024];
-        //printf("issue token.(%s)\n",parmstxt);
-        issue_generateToken(encoded,parmstxt,mp->NXTACCTSECRET);
-        encoded[NXT_TOKEN_LEN] = 0;
-        sprintf(buf,"[%s,{\"token\":\"%s\"}]",parmstxt,encoded);
-        //stripwhite(buf,strlen(buf));
-        retstr = clonestr(buf);
-        printf("%s\n",retstr);
-    }
-#endif
-    if ( parmstxt != 0 )
-        free(parmstxt);
-    return(retstr);
-}
-
-void multigateway_assetevent(char *sender,char *receiver,char *txid,char *assetid,int64_t assetoshis,char *comment)
-{
-    struct replicated_coininfo *lp;
-    struct daemon_info *cp;
-    struct coin_txid *tp;
-    struct crosschain_info *xp;
-    int32_t vout,createdflag,coinid,authenticatorflag = 1;
-    char withdrawaddr[512],coinname[16],cointxid[64];
-    cJSON *json=0,*obj;
-    struct coin_acct *acct;
-    struct withdraw_info *wp;
-    memset(withdrawaddr,0,sizeof(withdrawaddr));
-    if ( comment == 0 )
-        comment = "";
-    else replace_backslashquotes(comment);
-    coinid = conv_assetid(assetid);
-    lp = get_replicated_coininfo(coinid);
-    
-    if ( lp != 0 )
-    {
-        printf("assetcommand NXT.%s -> %s | %s %s -> (%s) assetid.%s %.8f (%s)\n",sender,receiver,assetid,txid,nxt64str(calc_nxt64bits(txid)),assetid,dstr(assetoshis),comment);
-        json = cJSON_Parse(comment);
-        if ( json != 0 )
-        {
-           // printf("assetcommand NXT.%s -> %s | %s %s -> (%s) assetid.%s %.8f coinid.%d (%s) -> (%s)\n",sender,receiver,assetid,txid,nxt64str(calc_nxt64bits(txid)),assetid,dstr(assetoshis),coinid,comment,cJSON_Print(json));
-            obj = cJSON_GetObjectItem(json,"crosschain");
-            if ( obj != 0 )
-            {
-                copy_cJSON(coinname,obj);
-                if ( conv_coinstr(coinname) == coinid )
-                {
-                    vout = (int)get_cJSON_int(json,"vout");
-                    obj = cJSON_GetObjectItem(json,"cointxid");
-                    if ( assetoshis != get_cJSON_int(json,"assetoshis") )
-                        printf("assetevent warning: assetoshis %ld != %ld json.assetoshis\n",(long)assetoshis,(long)get_cJSON_int(json,"assetoshis"));
-                    copy_cJSON(cointxid,obj);
-                    if ( cointxid[0] != 0 )
-                    {
-                        tp = MTadd_hashtable(&createdflag,&lp->coin_txids,cointxid);
-                        if ( tp != 0 )
-                        {
-                            tp->NXTxferbits = calc_nxt64bits(txid);
-                            printf("set %p NXTxferbits %ld %s\n",tp,(unsigned long)tp->NXTxferbits,txid);
-                            if ( vout >= 0 && vout < tp->numvouts && tp->vouts[vout] != 0 && (xp= tp->vouts[vout]->xp) != 0 )
-                            {
-                                if ( xp->NXT.asset_txid == 0 )
-                                {
-                                    xp->NXT.asset_txid = calc_nxt64bits(txid);
-                                    printf("link asset transfer to crosschain cointxid.%s NXTtxid.%s\n",cointxid,txid);
-                                }
-                                else
-                                    printf("????? unexpected duplicate assettransfer for cointxid.%s NXTtxid.%s\n",cointxid,txid);
-                            }
-                            else if ( get_daemon_info(coinid) == 0 )
-                                deposit_transfer_NXTacct(coinid,sender,assetoshis);
-                        }
-                    } else printf("bad format asset transfer comment (%s)\n",comment);
-                }
-                else printf("invalid coinname.%s for coinid.%d from asset.%s\n",coinname,coinid,assetid);
-            }
-            else
-            {
-                if ( strcmp(sender,NXTISSUERACCT) == 0 || strcmp(sender,GENESISACCT) == 0 || is_gateway_addr(sender) != 0 )
-                    return;
-                obj = cJSON_GetObjectItem(json,"redeem");
-                if ( obj != 0 )
-                {
-                    copy_cJSON(coinname,obj);
-                    if ( conv_coinstr(coinname) == coinid )
-                    {
-                        obj = cJSON_GetObjectItem(json,"coinaddr");
-                        copy_cJSON(withdrawaddr,obj);
-                        cp = get_daemon_info(coinid);
-                        acct = get_coin_acct(coinid,sender);
-                        if ( acct != 0 )
-                        {
-                            printf("acct withdraw.(%s)\n",acct->withdrawaddr);
-                            if ( withdrawaddr[0] == 0 )
-                                safecopy(withdrawaddr,acct->withdrawaddr,sizeof(withdrawaddr)), comment = 0;
-                            if ( strcmp(withdrawaddr,acct->withdrawaddr) == 0 )
-                                authenticatorflag = 0;
-                        }
-                        if ( withdrawaddr[0] == 0 || (cp != 0 && cp->validate_coinaddr != 0 && (*cp->validate_coinaddr)(cp,coinid,withdrawaddr) < 0) )
-                        {
-                            printf("no withdraw or invalid address.(%s) for NXT.%s %.8f\n",withdrawaddr,sender,dstr(assetoshis));
-                            return;
-                        }
-                        wp = MTadd_hashtable(&createdflag,&lp->redeemtxids,txid);
-                        if ( createdflag != 0 )
-                        {
-                            wp->coinid = coinid;
-                            wp->amount = assetoshis;
-                            safecopy(wp->NXTaddr,sender,sizeof(wp->NXTaddr));
-                            safecopy(wp->withdrawaddr,withdrawaddr,sizeof(wp->withdrawaddr));
-                            safecopy(wp->comment,comment,sizeof(wp->comment));
-                            wp->twofactor = authenticatorflag;
-                            printf("NXT.%s withdraw authenticator.%d %s amount %.8f\n",sender,authenticatorflag,coinid_str(coinid),dstr(wp->amount));
-                            queue_enqueue(&lp->withdrawreqs.pingpong[0],wp);
-                        }
-                        else
-                        {
-                            if ( wp->amount != assetoshis )
-                                printf("multigateway_handler %s rp->amount %.8f != %.8f assetoshis sender.%s\n",coinid_str(coinid),dstr(wp->amount),dstr(assetoshis),sender);
-                            if ( strcmp(wp->NXTaddr,sender) != 0 )
-                                printf("multigateway_handler %s rp->NXTaddr %s != sender.%s\n",coinid_str(coinid),wp->NXTaddr,sender);
-                            if ( strcmp(wp->redeemtxid,txid) != 0 )
-                                printf("multigateway_handler %s rp->NXTtxid %s != txid %s, sender.%s\n",coinid_str(coinid),wp->redeemtxid,txid,sender);
-                            if ( comment != 0 && strcmp(wp->comment,comment) != 0 )
-                                printf("multigateway_handler %s comment %s != %s, sender.%s\n",coinid_str(coinid),wp->comment,comment,sender);
-                        }
-                    }
-                    else printf("invalid redeem coinname.%s for coinid.%d from asset.%s\n",coinname,coinid,assetid);
-                }
-            }
-        }
-    }
-    if ( json != 0 )
-        free_json(json);
-}
-
-void *multigateway_handler(struct NXThandler_info *mp,struct NXT_protocol_parms *parms,void *handlerdata)
-{
-    static int acctinitflag;
-    struct replicated_coininfo *lp;
-    cJSON *argjson;
-    struct json_AM *ap;
-    struct gateway_info *gp = handlerdata;
-    char NXTaddr[64],*txid,*sender,*receiver;
-   // char *jsontxt;
-    int32_t createdflag,coinid;
-    if ( parms->txid == 0 )     // indicates non-transaction event
-    {
-        if ( parms->mode == NXTPROTOCOL_WEBJSON )
-            return(multigateway_jsonhandler(parms->argjson));
-        if ( parms->mode == NXTPROTOCOL_NEWBLOCK )
-            printf("multigateway new RTblock %d timestamp.%d\n",mp->RTflag,issue_getTime());
-        else if ( parms->mode == NXTPROTOCOL_IDLETIME )
-        {
-            if ( acctinitflag == 0 )
-            {
-                printf(">>>>>>>>>>> init gateway accts\n");
-                get_NXTacct(&createdflag,mp,NXTISSUERACCT);
-                get_NXTacct(&createdflag,mp,NXTACCTA);
-                get_NXTacct(&createdflag,mp,NXTACCTB);
-                get_NXTacct(&createdflag,mp,NXTACCTC);
-
-                printf(">>>>>>>>>>> done init gateway accts\n");
-                acctinitflag = 1;
-            }
-            //printf("NXT.%d multigateway new idletime RTflag.%d timestamp.%d\n",mp->NXTheight,mp->RTflag,issue_getTime());
-            //for (i=0; i<10; i++)
-             ///   if ( Coinloop(gp) == 0 )
-             //       break;
-        }
-        else if ( parms->mode == NXTPROTOCOL_INIT )
-        {
-            gp = calloc(1,sizeof(*gp));
-            gp->gatewayid = get_gatewayid(mp->ipaddr);
-            if ( mp->upollseconds != 0 )
-                printf("WARNING: multigateway shouldnt poll so fast\n"), sleep(5);
-            printf("multigateway init %d gatewayid.%d\n",mp->RTflag,gp->gatewayid);
-            Global_gp = gp;
-            init_multigateway(mp,gp);
-        }
-        return(gp);
-    }
-    gp->timestamp = mp->timestamp;
-    txid = parms->txid; sender = parms->sender; receiver = parms->receiver; ap = parms->AMptr;
-    if ( txid == 0 ) txid = "";
-    if ( parms->mode == NXTPROTOCOL_AMTXID )
-    {
-        expand_nxt64bits(NXTaddr,ap->H.nxt64bits);
-        if ( (argjson = parse_json_AM(ap)) != 0 )
-        {
-            printf("func.(%c) %s -> %s txid.(%s) assetid.(%s) JSON.(%s)\n",ap->funcid,sender,receiver,txid,parms->assetid,ap->jsonstr);
-            switch ( ap->funcid )
-            {
-                    // user created AM's
-                case GET_COINDEPOSIT_ADDRESS:
-                    update_coinacct_addresses(ap->H.nxt64bits,argjson,txid,-1);
-                    break;
-                    
-                    // gateway created AM's
-                case BIND_DEPOSIT_ADDRESS:
-                    if ( is_gateway_addr(sender) != 0 )
-                    {
-                        struct multisig_addr *msig;
-                        if ( (msig= decode_msigjson(NXTaddr,argjson)) != 0 )
-                            if ( update_acct_binding(msig->coinid,NXTaddr,msig) == 0 )
-                                free(msig);
-                    } else printf("sender.%s == NXTaddr.%s\n",sender,NXTaddr);
-                    break;
-                case DEPOSIT_CONFIRMED:
-                    // need to mark cointxid with AMtxid to prevent confirmation process generating AM each time
-                    if ( is_gateway_addr(sender) != 0 && (coinid= decode_depositconfirmed_json(argjson,txid)) >= 0 )
-                    {
-                        if ( (lp= get_replicated_coininfo(coinid)) != 0 )
-                        {
-                            queue_enqueue(&lp->retrydepositconfirmed.pingpong[0],argjson);
-                            argjson = 0;    // preserve it as it is in retry queue
-                        }
-                    }
-                    break;
-                case MONEY_SENT:
-                    if ( is_gateway_addr(sender) != 0 )
-                        update_money_sent(argjson,txid);
-                    break;
-                default: printf("funcid.(%c) not handled\n",ap->funcid);
-            }
-            if ( argjson != 0 )
-                free_json(argjson);
-        } else printf("can't JSON parse (%s)\n",ap->jsonstr);
-    }
-    else if ( parms->assetid != 0 && parms->assetoshis > 0 )
-        multigateway_assetevent(sender,receiver,txid,parms->assetid,parms->assetoshis,parms->comment);
-    return(0);
-}
-
 #endif
