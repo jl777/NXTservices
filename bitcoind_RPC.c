@@ -17,6 +17,8 @@
 #include <curl/easy.h>
 #include <stdint.h>
 
+#define NUM_BITCOIND_RETRIES 3  // bitcoind spews lots of errors, without retries and long enough delay, crashes
+#define MAGIC_BITCOINC_RPCDELAY 13  // smaller numbers cause mysterious crash, probably in libcurl??
 #define EXTRACT_BITCOIND_RESULT     // if defined, ensures error is null and returns the "result" field
 
 #ifdef EXTRACT_BITCOIND_RESULT
@@ -26,7 +28,7 @@ char *post_process_bitcoind_RPC(char *debugstr,char *command,char *params,char *
     long i,j,len;
     char *retstr = 0;
     cJSON *json,*result,*error;
-    if ( command == 0 || rpcstr == 0 )
+    if ( command == 0 || rpcstr == 0 || rpcstr[0] == 0 )
         return(rpcstr);
     //printf("%s post_process_bitcoind_RPC.%s.[%s] (%s)\n",debugstr,command,params,rpcstr);
     json = cJSON_Parse(rpcstr);
@@ -106,18 +108,19 @@ static size_t upload_data_cb(void *ptr,size_t size,size_t nmemb,void *user_data)
 
 char *bitcoind_RPC(char *debugstr,int32_t numretries,char *url,char *userpass,char *command,char *params)
 {
-    static int32_t count;
+    static int32_t count,didinit;
     static double elapsedsum,elapsedsum2,laststart;
-    static int32_t didinit;
     char *retstr,*bracket0,*bracket1,*databuf=0,len_hdr[10240];
     CURL *curl_handle;
     CURLcode res;
     long len;
-    int32_t delay = 13;
+    int32_t delay = MAGIC_BITCOINC_RPCDELAY;
     double starttime;
     struct curl_slist *headers = NULL;
     struct upload_buffer upload_data;
     struct MemoryStruct chunk;
+    //static pthread_mutex_t mutex;
+    //pthread_mutex_lock(&mutex);
     if ( didinit == 0 )
     {
         didinit = 1;
@@ -137,7 +140,8 @@ retry:
     chunk.memory = malloc(1);     // will be grown as needed by the realloc above
     chunk.size = 0;                 // no data at this point
     curl_handle = curl_easy_init();
-    curl_easy_setopt(curl_handle,CURLOPT_SSL_VERIFYHOST,0);
+    curl_easy_setopt(curl_handle,CURLOPT_CONNECTTIMEOUT,2); // chanc3r: limit any *real* timeouts to 2s
+    curl_easy_setopt(curl_handle,CURLOPT_FRESH_CONNECT,1);  // chanc3r: force a new connection for each request - i'm     curl_easy_setopt(curl_handle,CURLOPT_SSL_VERIFYHOST,0);
     curl_easy_setopt(curl_handle,CURLOPT_SSL_VERIFYPEER,0);
     curl_easy_setopt(curl_handle,CURLOPT_URL,url);
     curl_easy_setopt(curl_handle, CURLOPT_NOSIGNAL, 1);        // supposed to fix "Alarm clock" and long jump crash
@@ -180,8 +184,8 @@ retry:
         {
             free(chunk.memory);
             curl_easy_cleanup(curl_handle);
-            curl_global_cleanup();
-            curl_global_init(CURL_GLOBAL_ALL); //init the curl session
+            //curl_global_cleanup();
+            //curl_global_init(CURL_GLOBAL_ALL); //init the curl session
             goto retry;
         }
     }
@@ -198,9 +202,10 @@ retry:
     count++;
     elapsedsum2 += (milliseconds() - starttime);
 #ifndef __APPLE__
-    if ( elapsedsum2/count > 10 || (milliseconds() - starttime) > 1000 )
+    if ( elapsedsum2/count > 100 || (milliseconds() - starttime) > 1000 )
         fprintf(stderr,"%d: %9.6f %9.6f | elapsed %.3f millis | bitcoind_RPC.(%s)\n",count,elapsedsum/count,elapsedsum2/count,(milliseconds() - starttime),url);
 #endif
+   // pthread_mutex_unlock(&mutex);
     return(post_process_bitcoind_RPC(debugstr,command,params,retstr));
 }
 
