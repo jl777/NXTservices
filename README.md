@@ -22,4 +22,10 @@ If all goes well, it should just build
 
 James
 
+More stuff added:
+http://invisible-island.net/datafiles/release/cdk.tar.gz
+http://libtom.org/ has lots of useful crypto and other algos
+http://basyl.co.uk/code/punch/doc/files/Readme-txt.html
+
+
 
