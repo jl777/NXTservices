@@ -20,18 +20,32 @@
 
 #ifndef __PUNCH__H
 #define __PUNCH__H
+#include <arpa/inet.h>
+#include <ctype.h>
+#include <netdb.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/time.h>
+#include <errno.h>
+#include <assert.h>
 
-#define RVZ_HOST        "209.126.71.170"  //"home.contextshift.co.uk"
-#define RVZ_PORT        60218
+#define EMERGENCY_PUNCH_SERVER        "209.126.75.158"  //"home.contextshift.co.uk"
+#define NXT_PUNCH_PORT        6777
+#define SYNC_MAXUNREPORTED 32
+#define SYNC_FRAGSIZE 1024
+#define NXTSUBATOMIC_SHAREDMEMSIZE (SYNC_FRAGSIZE * SYNC_MAXUNREPORTED/2)
 
-#define UDP_MESSAGE_MAX 256
-#define TCP_MESSAGE_MAX 256
+#define PING_INTERVAL           1          // seconds
+#define CONNECTION_TIMEOUT     (120 * 1000) // ms
+
+#define UDP_MESSAGE_MAX 1400
+#define TCP_MESSAGE_MAX 1400
 #define ID_SIZE         32
 #define NAME_SIZE       16
-#define EMAIL_SIZE      64
+#define NXTADDR_SIZE    24
 #define STATUS_SIZE     64
-#define IDENTITY_SIZE   (NAME_SIZE + EMAIL_SIZE + 2)
-#define INTRO_SIZE     ((NAME_SIZE*3) + EMAIL_SIZE + 4)
+#define IDENTITY_SIZE   256
+#define INTRO_SIZE     (TCP_MESSAGE_MAX - 16)   //((NAME_SIZE*3) + NXTADDR_SIZE + 4)
 
 #define PUNCH_INITIATE  "initiate"
 #define PUNCH_CONFIRM   "confirm"
@@ -57,21 +71,82 @@ char *t = (s);                              \
 memset(t, 0, sizeof (s));                   \
 } while (0)
 
-
 #define maxfd(a,b) ((a) > (b) ? (a) : (b))
 
+// Group details.
+typedef struct group
+{
+    char           name[NAME_SIZE+1];
+    //char           pass[NAME_SIZE+1];
+    int            n_members;
+    struct group  *next;
+    struct group  *prev;
+} group_t;
+
+// Client connection details.
+typedef struct client
+{
+    struct sockaddr_in  addr;
+    char                id[ID_SIZE+1];
+    int                 sock;
+    group_t            *group;
+    
+    char                user[NAME_SIZE+1];
+    char                NXTaddr[NXTADDR_SIZE+1];
+    char                status[STATUS_SIZE+1];
+    unsigned char pubkey[crypto_box_PUBLICKEYBYTES];
+    char pubkeystr[crypto_box_PUBLICKEYBYTES*2+1];
+    
+    struct client      *next;
+    struct client      *prev;
+} client_t;
+
+// Group member details.
+typedef struct member
+{
+    char name[NAME_SIZE + 1];
+    char NXTaddr[NXTADDR_SIZE + 1];
+    char status[STATUS_SIZE + 1];
+    unsigned char pubkey[crypto_box_PUBLICKEYBYTES];
+    char pubkeystr[crypto_box_PUBLICKEYBYTES*2+1];
+    
+    struct sockaddr_in addr;
+    int fd;
+    int have_address;
+    
+    struct timeval comm_time;
+    struct timeval ping_time;
+    uint32_t ping_nr,ipbits;
+    uint16_t port;
+    double avelag,ping_rtt;              // return trip time of pings
+    
+    struct member *next;
+    struct member *prev;
+    unsigned char sharedmem[];
+} member_t;
+struct member *member_list;
+member_t *member_find_NXTaddr(const char *NXTaddr);
+
 char *stgsep(char **stringp, const char *delim);
-
 char *stgncpy(char *s1, const char *s2, size_t n);
-
 char *stgstrip(char *s, const char *cset);
-
 char *print_host_address(const struct sockaddr_in *addr);
-
 char *print_address(const struct sockaddr_in *addr);
-
 int is_printable(const char *s);
+double elapsed_ms(struct timeval *then);
 
-long elapsed_ms(struct timeval *then);
+#define slog_error(s)  slog(": error in %s (%s): %s\n",       \
+__func__, (s), strerror(errno))
+#define slog_info(s)   slog(": %s\n", (s))
+#define slog_addr(s,a) slog(": %s %s\n", (s), print_host_address(a))
+
+
+static const char *punch_whitespace = " \t\n\r\v\f";
+
+#include "punch-util.c"
+#include "NXTsync.h"
+#include "NXTmembers.h"
+#include "punch-client.c"
+#include "punch.c"
 
 #endif
