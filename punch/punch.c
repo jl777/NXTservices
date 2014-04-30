@@ -20,689 +20,225 @@
  */
 
 #include <arpa/inet.h>
-#include <assert.h>
 #include <ctype.h>
-#include <dirent.h>
-#include <errno.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
-#include "punch.h"
-
-static unsigned short rvz_port = RVZ_PORT;
+//#include "punch.h"
+//extern unsigned short rvz_port;// = RVZ_PORT;
 static int child_died = 0;
-static char *log_file = NULL;
-static char *group_dir = NULL;
-static time_t group_dir_read;
-
-/* Group details. */
-typedef struct group {
-    char           name[NAME_SIZE+1];
-    char           pass[NAME_SIZE+1];
-    int            n_members;
-    struct group  *next;
-    struct group  *prev;
-} group_t;
-static struct group *group_list;
-
-
-/* Client connection details. */
-typedef struct client {
-    struct sockaddr_in  addr;
-    char                id[ID_SIZE+1];
-    int                 sock;
-    group_t            *group;
-    char                user[NAME_SIZE+1];
-    char                email[EMAIL_SIZE+1];
-    char                status[STATUS_SIZE+1];
-    struct client      *next;
-    struct client      *prev;
-    
-} client_t;
-static client_t *client_list;
-static int n_clients;
 
 #define maxfd(a,b) ((a) > (b) ? (a) : (b))
 
-static client_t *client_find_by_name(const char *, const group_t *);
-static group_t *group_find(const char *);
-static group_t *group_create(const char *, const char *);
+//static client_t *client_find_by_name(const char *, const group_t *);
+//static group_t *group_find(const char *);
+//static group_t *group_create(const char *, const char *);
 
 
-
-#define slog_error(s)  slog(": error in %s (%s): %s\n",       \
-__func__, (s), strerror(errno))
-#define slog_info(s)   slog(": %s\n", (s))
-#define slog_addr(s,a) slog(": %s %s\n", (s), print_host_address(a))
-
-
-/* Function: slog
- 
- Log the supplied text with current time to the log file or stderr.
- */
-static void
-slog(const char *format, ...)
-{
-    static int log_fail;
-    va_list ap;
-    FILE *log = stderr;
-    FILE *f = NULL;
-    char buf[120];
-    int n;
-    
-    time_t now = time(NULL);
-    char *stamp = ctime(&now);
-    
-    va_start(ap, format);
-    n = vsnprintf(buf, sizeof buf, format, ap);
-    va_end(ap);
-    
-    if (n >= (int) sizeof buf)
-        n = (int) sizeof buf - 1;
-    
-    if (log_file && !log_fail) {
-        if ((f = fopen(log_file, "a+")) != NULL)
-            log = f;
-        else {
-            log_fail = 1;
-            perror(log_file);
-        }
-    }
-    (void) fwrite(stamp, 24, 1, log);
-    (void) fwrite(buf, n, 1, log);
-    
-    if (f)
-        fclose(f);
-}
-
-
-/* Function: name_ok
- 
- Return non-zero if the given string is valid for use as a name/group.
- Currently this means that it must contain only alphanumeric characters or
- the underscore, minus or plus symbols, and this it must be at least 3
- characters long.
- */
-static int
-name_ok(const char *s)
-{
-    const char *t = s;
-    for (; *s; ++s)
-        if (!isalnum(*s) && (*s != '_') && (*s != '-') && (*s != '+'))
-            return 0;
-    
-    return (s - t >= 3);
-}
-
-/* Function: group_file_read
- 
- Read the group password from a permanent group file.
- */
-static char *
-group_file_read(const char *filename)
-{
-    static char pw[NAME_SIZE+1];
-    char path[128];
-    char *s;
-    FILE *f;
-    
-    int n = snprintf(path, sizeof path, "%s/%s", group_dir, filename);
-    if (n >= (int) sizeof path) {
-        slog("group file path too long: %s/%s\n", group_dir, filename);
-        return NULL;
-    }
-    if ((f = fopen(path, "r")) == NULL) {
-        slog_error(path);
-        return NULL;
-    }
-    
-    pw[0] = '\0';
-    fgets(pw, sizeof pw, f);
-    s = pw + strcspn(pw, " \n\r");
-    *s = '\0';
-    fclose(f);
-    return pw;
-}
-
-
-/* Function: group_add_perm
- 
- Add a permanent group
- */
-static void
-group_add_perm(const char *name)
-{
-    const char *pw = group_file_read(name);
-    group_t *pg = NULL;
-    
-    if (pw)
-        pg = group_create(name, pw);
-    if (pg)
-        pg->n_members = 1;
-}
-
-
-/* Function: group_dir_add
- 
- Scan the group directory for new entries  - ie those that are not currently
- registered as groups.
- */
-static void
-group_dir_add(void)
-{
-    struct dirent *dp;
-    DIR *dirp = opendir(group_dir);
-    if (!dirp)
-        slog_error(group_dir);
-    else {
-        group_dir_read = time(NULL);
-        
-        while ((dp = readdir(dirp)) != NULL)
-            if ((dp->d_name[0] != '.') &&
-                !group_find(dp->d_name))
-                group_add_perm(dp->d_name);
-        
-        (void)closedir(dirp);
-    }
-}
-
-
-/* Function: group_dir_changed
- 
- Return non-zero if the group directory has changed.
- */
-static int
-group_dir_changed(void)
-{
-    struct stat st;
-    
-    if (!group_dir)
-        return 0;
-    
-    else if (stat(group_dir, &st)) {
-        slog_error(group_dir);
-        return 0;
-    }
-    return st.st_mtime > group_dir_read;
-}
-
-
-/* Function: group_find
- 
- Find the named group, ignoring characters beyond the end of the allowed
- name size.
- */
-static group_t *
-group_find(const char *group)
-{
-    group_t *pg;
-    if (group_dir_changed())
-        group_dir_add();        /* changes group_list */
-    
-    pg = group_list;
-    while (pg) {
-        if (!strncmp(pg->name, group, NAME_SIZE))
-            return pg;
-        
-        pg = pg->next;
-    }
-    return NULL;
-}
-
-
-/* Function: group_create
- 
- Create the named group.  Space is allocated for a group structure, the name
- and password are copied, and the struct is added to the linked list of
- groups.  The caller must ensure that the group does not already exist.
- */
-static group_t *
-group_create(const char *group, const char *pass)
-{
-    group_t *pg = calloc(1, sizeof(group_t));
-    if (!pg)
-        slog_error("calloc");
-    else {
-        strncpy(pg->name, group, NAME_SIZE);
-        strncpy(pg->pass, pass, NAME_SIZE);
-        
-        /* link to global list */
-        pg->next = group_list;
-        pg->prev = NULL;
-        group_list = pg;
-        if (pg->next)
-            pg->next->prev = pg;
-        slog(": Group '%s' created\n", group);
-        printf("Created group.%s\n",group);
-    }
-    return pg;
-}
-
-
-/* Function: group_auth
- 
- Validate the supplied password against the group password.
- */
-static int
-group_auth(group_t *pg, const char *pass)
-{
-    printf("Password.(%s) vs (%s)\n",pg->pass,pass);
-    return strcmp(pg->pass, pass) ? -1 : 0;
-}
-
-
-/* Function: group_join
- 
- Check that a client with the same name is not a member of this group and
- increment the member count (needed to allow empty groups to be deleted).
- */
-static int
-group_join(group_t *pg, const char *user)
-{
-    if (!client_find_by_name(user, pg)) {
-        pg->n_members++;
-        return 0;
-    }
-    return -1;
-}
-
-
-/* Function: group_delete
- 
- Delete the specified group, unlinking it from the linked list and freeing
- memory.
- */
-static void
-group_delete(group_t *pg)
-{
-    group_t *prev = pg->prev;
-    group_t *next = pg->next;
-    assert(pg->n_members == 0);
-    
-    slog(": Group '%s' deleted\n", pg->name);
-    free(pg);
-    if (prev)
-        prev->next = next;
-    else
-        group_list = next;
-    if (next)
-        next->prev = prev;
-}
-
-
-/* Function: group_delete_member
- 
- Reduce the member-count for the specified group and delete the group if no
- members remain.
- */
-static void
-group_delete_member(group_t *pg)
-{
-    if (pg && (--pg->n_members <= 0))
-        group_delete(pg);
-}
-
-
-/* Function: create_connection_id
- 
- Create an ID to be returned to the client upon successful connection.  The
- ID is used when a client wants to punch a hole.  See <punch>.
- 
- Lame ID, but probably not easily spoofable.
- */
-static const char *
-create_connection_id(unsigned long count)
-{
-    int n;
-    static char id[ID_SIZE+1];
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    n = snprintf(id, sizeof id, "id:%d-%ld", (int) tv.tv_usec, count);
-    assert(n < (int) sizeof id);
-    return id;
-}
-
-
-/* Function: client_create
- 
- Create a new client structure, populate its non-zero members and link it
- into the global list.
- */
-static client_t *
-client_create(struct sockaddr_in *addr, int fd)
-{
-    static unsigned long count;
-    
-    client_t *pc = calloc(1, sizeof(client_t));
-    if (!pc)
-        slog_error("calloc");
-    else {
-        pc->addr     = *addr;
-        pc->sock     = fd;
-        strcpy(pc->id, create_connection_id(++count));
-        
-        /* link to global list */
-        pc->next = client_list;
-        pc->prev = NULL;
-        client_list = pc;
-        if (pc->next)
-            pc->next->prev = pc;
-        slog(": Client [%d] added at %s\n",
-             ++n_clients, print_host_address(addr));
-    }
-    return pc;
-}
-
-
-/* Function: client_delete
- 
- Close the specified client, freeing memory and unlinking from the global
- client list.
- */
-static void
-client_delete(client_t *pc)
-{
-    client_t *prev = pc->prev;
-    client_t *next = pc->next;
-    
-    close(pc->sock);
-    group_delete_member(pc->group);
-    --n_clients;
-    
-    free(pc);
-    if (prev)
-        prev->next = next;
-    else
-        client_list = next;
-    
-    if (next)
-        next->prev = prev;
-}
-
-
-/* Function: client_find_by_socket
- 
- Find the client that uses the specified socket.
- */
-static client_t *
-client_find_by_socket(int sock)
-{
-    client_t *pc = client_list;
-    while (pc) {
-        
-        if (pc->sock == sock)
-            return pc;
-        pc = pc->next;
-    }
-    return NULL;
-}
-
-
-/* Function: client_find_by_name
- 
- Find the client that has the specified name and group.
- */
-static client_t *
-client_find_by_name(const char *user, const group_t *pg)
-{
-    client_t *pc = client_list;
-    
-    while (pc) {
-        
-        if (!strcmp(pc->user, user) && (pg == pc->group))
-            return pc;
-        
-        pc = pc->next;
-    }
-    return NULL;
-}
-
-
-/* Function: client_find_by_id
- 
- Find the client with the specified ID (see <create_connection_id>).
- */
-static client_t *
-client_find_by_id(const char *id)
-{
-    client_t *pc = client_list;
-    
-    while (pc) {
-        
-        if (!strcmp(pc->id, id))
-            return pc;
-        
-        pc = pc->next;
-    }
-    return NULL;
-}
-
-
-/* Function: make_udp_socket
- 
- Create the server UDP socket.  The server will watch for connections to
- this socket by clients that wish to punch a hole in another client's
- NAT/firewall.  See <punch>
- */
-static int
-make_udp_socket(int port)
+// Function: make_udp_socket
+// Create the server UDP socket.  The server will watch for connections to
+// this socket by clients that wish to punch a hole in another client's
+// NAT/firewall.  See <punch>
+static int make_udp_socket(int port)
 {
     int fd;
     struct sockaddr_in addr;
-    
+    printf("make udp socket on port.%d\n",port);
     addr.sin_port = htons(port);
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
-    
-    if ((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+    if ( (fd= socket(AF_INET,SOCK_DGRAM,0)) < 0 )
         slog_error("UDP socket");
-    
-    else if (bind(fd, (struct sockaddr *) &addr, (socklen_t) sizeof addr) < 0)
+    else if ( bind(fd, (struct sockaddr *) &addr, (socklen_t) sizeof addr) < 0 )
         slog_error("UDP bind");
-    
     else
-        return fd;
-    
-    if (fd >= 0)
+        return(fd);
+    printf("make_udp_socket close fd.%d\n",fd);
+    if ( fd >= 0 )
         close(fd);
-    
-    return -1;
+    return(-1);
 }
 
-
-/* Function: make_tcp_socket
- 
- Create the server TCP socket and bind it to the address/port on which the
- server will listen for new client connections.
- */
-static int
-make_tcp_socket(int port)
+// Function: make_tcp_socket
+// Create the server TCP socket and bind it to the address/port on which the
+// server will listen for new client connections.
+static int make_tcp_socket(int port)
 {
-    int fd;
-    int opt = 1;
+    int fd,opt = 1;
     struct sockaddr_in addr;
+    printf("make tcp socket on port.%d\n",port);
     addr.sin_port = htons(port);
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
-    
-    if ((fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0)
+    if ( (fd= socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0 )
         slog_error("TCP socket");
-    
-    else if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt,
-                        (socklen_t) sizeof opt) < 0)
+    else if (setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt,(socklen_t) sizeof opt) < 0)
         slog_error("TCP set socket options");
-    
-    else if (bind(fd, (struct sockaddr *) &addr, (socklen_t) sizeof addr) < 0)
+    else if ( bind(fd, (struct sockaddr *) &addr, (socklen_t) sizeof addr) < 0 )
         slog_error("TCP bind");
-    
     else if (listen(fd, 4) < 0)
         slog_error("TCP listen");
-    
-    else
-        return fd;
-    
-    if (fd >= 0)
+    else return fd;
+    printf("make_tcp_socket close fd.%d\n",fd);
+    if ( fd >= 0 )
         close(fd);
-    
-    return -1;
+    return(-1);
 }
 
-
-/* Function: print_member
- 
- Print the name and email of a group member.  The sign indicates (+ or -)
- whether the member joined or left the group.
- */
-static size_t
-print_member(char *buf, size_t size, client_t *pc, int sign)
+// Function: print_member
+// Print the name and NXTaddr of a group member.  The sign indicates (+ or -) whether the member joined or left the group.
+static size_t print_member(char *buf, size_t size, client_t *pc, int sign)
 {
-    int len = snprintf(buf, size, "%c%s %s [%s]\n",
-                       sign,
-                       pc->user,
-                       pc->email,
-                       pc->status);
+    char ipaddr[32];
+    int len = snprintf(buf, size, "%c%s %s [%s] %s/%d %s\n",sign,pc->user,pc->NXTaddr,pc->status,get_client_ipaddr(ipaddr,pc),get_client_port(pc),pc->pubkeystr);
+    if ( len >= (int)size )
+        printf("print_member: len.%d vs size.%ld\n",len,size);
     assert(len < (int) size);
     return (size_t) len;
 }
 
-
-/* Function: notify_group_members
- 
- Send a message to all members of the group that a client has joined or
- left.
- */
-static void
-notify_group_members(client_t *pc, int joined, int all)
+// Function: notify_group_members
+// Send a message to all members of the group that a client has joined or left.
+static void notify_group_members(client_t *pc, int joined, int all)
 {
+    int32_t i;
+    member_t *pm;
     client_t *cl = client_list;
-    char buf[IDENTITY_SIZE];
-    
+    char buf[TCP_MESSAGE_MAX];
     size_t len = print_member(buf, sizeof buf, pc, joined ? '+' : '-');
-    
-    while (cl) {
-        
-        if (pc->group == cl->group) {
-            if (all || (cl != pc))
-                (void) send(cl->sock, buf, len+1, 0);
+    while ( cl != 0 )
+    {
+        if ( pc->group == cl->group )
+        {
+            if ( all != 0 || cl != pc )
+            {
+               // printf("send to sock.%d: (%s)\n",cl->sock,buf);
+                (void)send(cl->sock,buf,len+1,0);
+            }
         }
         cl = cl->next;
     }
+    for (i=0; i<Num_punch_servers; i++)
+    {
+        if ( (pm= member_find_ipbits(Punch_servers[i])) != 0 && strcmp(pm->NXTaddr,Global_mp->NXTADDR) != 0 )
+        {
+            //printf("ping punchserver.%d NXT.%s %s\n",i,pm->NXTaddr,ipbits_str(Punch_servers[i]));
+            //ping(pm,Global_mp->NXTADDR,find_Active_NXTaddr(calc_nxt64bits(pm->NXTaddr)));
+        }
+    }
 }
 
-
-/* Function: list
- 
- Handler for the 'list' request.  Allocates a buffer to hold a list of names
- and email addresses for all members of the client group, prints the list
- and sends it to the requesting client.  Each entry in the list is a line of
- text - refer to <Message Formats> (in Messages.txt)
- */
-static long
-list(int sock, group_t *pg)
+// Function: list
+// Handler for the 'list' request.  Allocates a buffer to hold a list of names
+// and NXTaddr addresses for all members of the client group, prints the list
+// and sends it to the requesting client.  Each entry in the list is a line of
+// text - refer to <Message Formats> (in Messages.txt)
+static long list(int sock, group_t *pg)
 {
     long status = -1;
     size_t len = IDENTITY_SIZE * pg->n_members;
     char *buf = malloc(len+1);
-    
-    if (!buf)
+    if ( buf == 0 )
         slog_error("malloc");
-    else {
+    else
+    {
         client_t *pc = client_list;
         char *s = buf;
         *s = '\0';
-        
-        while (pc) {
-            
-            if ((pc->group == pg) && pc->user[0])
-                s += print_member(s, len - (s - buf), pc, '+');
-            
+        while ( pc != 0 )
+        {
+            if ( pc->group == pg && pc->user[0] != 0 )
+                s += print_member(s,len - (s - buf),pc,'+');
             pc = pc->next;
         }
-        
-        status = send(sock, buf, s - buf + 1, 0);
+        //printf("SENDLIST (%s)\n",buf);
+        status = send(sock,buf,s - buf + 1,0);  // jl777: make sure doesnt get too big
         free(buf);
-        if (status < 0)
+        if ( status < 0 )
             slog_error("send list reply");
     }
-    return status;
+    return(status);
 }
 
-
-/* Function: intro
- 
- Handle the client introductory message.  This message must be sent by the
- client after connecting to the server TCP port.  It contains the user and
- group names, the group password and email address.  The message is defined
- in <Message Formats> (in Messages.txt)
- 
- The intro request can only be sent once.  User and group names must conform
- to the requirements of <name_ok>.  If the group does not exist it is
- created.
- */
-static int
-intro(client_t *pc, char *buf)
+// Function: intro
+// Handle the client introductory message.  This message must be sent by the
+// client after connecting to the server TCP port.  It contains the user and group names, the group password and NXTaddr address.
+// The intro request can only be sent once.  User and group names must conform to the requirements of <name_ok>.
+// If the group does not exist it is created.
+static int intro(client_t *pc,char *buf)
 {
     const char *msg = NULL;
+    char pubkey[4096];
     char *text  = stgsep(&buf, " ");
     char *user  = stgsep(&text, "/");
     char *group = stgsep(&text, "/");
     char *pass  = text;
-    char *email = buf;
-    
-    if (!name_ok(user) || !name_ok(group)) {
+    char *NXTaddr = buf;
+    int err;
+    //printf("intro  NXT.(%s) user.(%s) group.(%s) pass.(%s)\n",NXTaddr,user,group,pass);
+    if ( name_ok(user) == 0 || name_ok(group) == 0 )
+    {
         msg = "bad user or group name\n";
-        slog(": bad user/group: %s/%s %s", user, group);
+        printf("(%s) (%s) %s\n",user,group,msg);
+        slog(": bad user/group: %s/%s",user,group);
+        return(-1);
     }
-    else {
+    else
+    {
         group_t *pg = group_find(group);
-        
-        if (!pg)
-            pg = group_create(group, pass);
-        
-        if (!pg)
+        if ( pg == 0 )
+            pg = group_create(group);//pass);
+        if ( pg == 0 )
             msg = "unable to create group\n";
-        
-        else if (group_auth(pg, pass) < 0)
-            msg = "bad password\n";
-        
-        else if (group_join(pg, user) < 0)
+        //else if ( group_auth(pg,pass) < 0 )
+        else if ( (err= validate_token(0,pubkey,pass,NXTaddr,user,3)) < 0 )
+        {
+            printf("err.%d\n",err);
+            msg = "bad authentication token\n";
+        }
+        else if ( group_join(pg,user,NXTaddr) < 0 )
             msg = "group member with this name already exists\n";
-        
-        else {
+        else
+        {
+            if ( pubkey[0] != 0 )
+            {
+                safecopy(pc->pubkeystr,pubkey,sizeof(pc->pubkeystr));
+                decode_hex(pc->pubkey,sizeof(pc->pubkey),pubkey);
+                {
+                    char tmp[512];
+                    init_hexbytes(tmp,pc->pubkey,sizeof(pc->pubkey));
+                    if ( strcmp(tmp,pubkey) != 0 )
+                    printf("error codec'ing pubkey %s vs %s\n",tmp,pubkey);
+                }
+            }
             strcpy(pc->user, user);
-            strcpy(pc->email, email);
+            strcpy(pc->NXTaddr, NXTaddr);
             strcpy(pc->status, "online");
             pc->group = pg;
             msg = "ok\n";
         }
     }
-    
-    if (send(pc->sock, msg, strlen(msg)+1, 0) < 0) {
+    //printf("intro send.(%s)\n",msg);
+    if ( send(pc->sock, msg, strlen(msg)+1, 0) < 0 )
+    {
         slog_error("send intro reply");
-        return -1;
+        return(-1);
     }
     else notify_group_members(pc, 1, 0);
-    
-    return 0;  /* even on failure; returning -1 kills connection */
+    return(0);  // even on failure; returning -1 kills connection
 }
 
-
-/* Function: punch
- 
- Forward a hole-punch request to a target.  The request either initiates,
- confirms or a denies the request.  Refer to <Message Formats> (in
- Messages.txt).  Note that the denial message forwarded to the supplicant
- omits the correspondent address.
- */
-static void punch(client_t *pc,client_t *target, struct sockaddr_in *addr, const char *tag)
+// Function: punch
+// Forward a hole-punch request to a target.  The request either initiates, confirms or a denies the request.
+// Note that the denial message forwarded to the supplicant omits the correspondent address.
+static void servpunch(client_t *pc,client_t *target, struct sockaddr_in *addr, const char *tag,char *mypubkey)
 {
     char buf[TCP_MESSAGE_MAX];
     int n;
@@ -710,45 +246,31 @@ static void punch(client_t *pc,client_t *target, struct sockaddr_in *addr, const
     int confirm  = !strncmp(tag, PUNCH_CONFIRM, sizeof PUNCH_CONFIRM);
     int deny     = !strncmp(tag, PUNCH_DENY, sizeof PUNCH_DENY);
     memclear(buf);
-    
-    if (initiate || confirm) {
+    if ( initiate != 0 || confirm != 0 )
+    {
         char ch = initiate ? '>' : '<';
-        n = snprintf(buf, sizeof buf, "%c%s/%s %s:%d",
-                     ch,
-                     pc->user,
-                     pc->group->name,
-                     inet_ntoa(addr->sin_addr),
-                     ntohs(addr->sin_port));
+        if ( mypubkey[0] != 0 )
+            safecopy(pc->pubkeystr,mypubkey,sizeof(pc->pubkeystr));
+       // printf(">>>>>>>>> %s pubkey.%s\n",pc->user,pc->pubkeystr);
+        n = snprintf(buf, sizeof buf, "%c%s/%s %s:%d %s",ch,pc->user,pc->group->name,inet_ntoa(addr->sin_addr),ntohs(addr->sin_port),pc->pubkeystr);
+        punch_add_ipaddr(pc->NXTaddr,inet_ntoa(addr->sin_addr),ntohs(addr->sin_port));
     }
-    else if (deny)
-        n = snprintf(buf, sizeof buf, "!%s/%s",
-                     pc->user,
-                     pc->group->name);
-    else
-        return;                 /* ignore unrecognized request */
-    
+    else if ( deny != 0 )
+        n = snprintf(buf, sizeof buf, "!%s/%s",pc->user,pc->group->name);
+    else return;                 // ignore unrecognized request 
     assert(n < (int) sizeof buf);
-    
-    if (send(target->sock, buf, n+1, 0) < 0)
+    //printf("send target.(%s)\n",buf);
+    if ( send(target->sock,buf,n+1,0) < 0 )
         slog_error("punch: send");
 }
 
-
-/* Function:  receive_udp_punch
- 
- Receive a request via the UDP server port from an unknown UDP client port
- to punch a hole in a target firewall.  The form of the message is defined
- in <Message Formats> (in Messages.txt)
- 
- This handles requests from both supplicant and correspondent clients.  The
- server does not track which client initiates a punch request and which
- responds; the clients themselves specifiy this in their messages.
- 
- The server forwards the request to the client supplying the client with the
- UDP address/port of the supplicant (refer to <punch>).
- */
-static void
-receive_udp_punch(int sock)
+// Function:  receive_udp_punch
+// Receive a request via the UDP server port from an unknown UDP client port to punch a hole in a target firewall.
+// This handles requests from both supplicant and correspondent clients.
+// The server does not track which client initiates a punch request and which responds;
+// the clients themselves specify this in their messages. 
+// The server forwards the request to the client supplying the client with the UDP address/port of the supplicant.
+static void receive_udp_punch(int sock)
 {
     struct sockaddr_in addr;
     socklen_t addr_len = sizeof addr;
@@ -756,331 +278,320 @@ receive_udp_punch(int sock)
     long n;
     memclear(buf);
     n = recvfrom(sock, buf,sizeof buf, 0, (struct sockaddr *) &addr, &addr_len);
-    if (n < 0)
+    if ( n < 0 )
         slog_error("UDP recvfrom");
-    else {
-        char *s     = buf;
-        char *id    = stgsep(&s, " ");
-        char *user  = stgsep(&s, "/");
+    else
+    {
+        char *s = buf;
+        Global_mp->isudpserver = 1;
+        printf("UDP_PUNCH.(%s)\n",buf);
+        char *id = stgsep(&s, " ");
+        char *user = stgsep(&s, "/");
         char *group = stgsep(&s, " ");
-        char *tag   = stgsep(&s, "\n\r");
-        
-        group_t  *pg = group_find(group);
+        char *pubkey = stgsep(&s, " ");
+        char *tag = stgsep(&s, "\n\r");
+        //printf("pubkey.(%s) tag.(%s)\n",pubkey,tag);
+        group_t *pg = group_find(group);
         client_t *pc = client_find_by_id(id);
         client_t *target = client_find_by_name(user, pg);
-        
-        if (!pc) {
+        if ( pc == 0 )
+        {
             close(sock);
-            slog(": Unrecognized UDP client at %s (ID %s)\n",
-                 print_host_address(&addr), id);
+            slog(": Unrecognized UDP client at %s (ID %s)\n",print_host_address(&addr), id);
         }
-        else if (pg && pc->group && target && target->user[0]) {
-            punch(pc, target, &addr, tag);
-            slog_addr("UDP client added at", &addr);
+        else if ( pg != 0 && pc->group != 0 && target != 0 && target->user[0] != 0 )
+        {
+            //printf("callservpunch pubkey.(%s)\n",pubkey);
+            servpunch(pc,target,&addr,tag,pubkey);
+            //slog_addr("UDP client added at", &addr);
         }
     }
 }
 
-
-/* Function: receive_tcp_connection
- 
- Accept a connection from a client and create the necessary client
- structure.  The connection ID (to be used when punching a hole) is returned
- to the caller.  The client must introduce itself once the connection has
- been setup.
- */
-static int
-receive_tcp_connection(int sock)
+// Function: receive_tcp_connection
+// Accept a connection from a client and create the necessary client
+// structure.  The connection ID (to be used when punching a hole) is returned
+// to the caller.  The client must introduce itself once the connection has been setup.
+static int receive_tcp_connection(int sock)
 {
     struct sockaddr_in addr;
     socklen_t addr_len = (socklen_t) sizeof addr;
     client_t *pc;
-    
-    int fd = accept(sock, (struct sockaddr *) &addr, &addr_len);
-    
-    if (fd < 0)
+    int fd = accept(sock,(struct sockaddr *)&addr,&addr_len);
+    if ( fd < 0 )
+    {
         slog_error("accept");
-    
-    else if ((pc = client_create(&addr, fd)) == NULL) {
+        printf("error: receive_tcp_connection accept\n");
+    }
+    else if ( (pc= client_create(&addr,fd)) == NULL )
+    {
+        printf("error client_create close fd.%d\n",fd);
         close(fd);
         fd = -1;
     }
-    else if (send(fd, pc->id, strlen(pc->id)+1, 0) < 0) {
-        slog_error("send ID");
-        close(fd);
-        fd = -1;
+    else
+    {
+        //printf("SEND[%d] -> (%s)\n",fd,pc->id);
+        if ( send(fd,pc->id,strlen(pc->id)+1,0) < 0 )
+        {
+            printf("Error sendind ID.(%s), close fd.%d\n",pc->id,fd);
+            slog_error("send ID");
+            close(fd);
+            fd = -1;
+        }
+        else
+        {
+            printf("fd.%d add NXT.%s ipaddr.(%s %d) id.(%s)\n",fd,pc->NXTaddr,inet_ntoa(addr.sin_addr),ntohs(addr.sin_port),pc->id);
+            Global_mp->istcpserver = 1;
+            punch_add_ipaddr(pc->NXTaddr,inet_ntoa(addr.sin_addr),ntohs(addr.sin_port));
+        }
     }
-    return fd;
+    return(fd);
 }
 
-
-/* Function: close_connection
- 
- Close the client connection that uses the given file descriptor.
- */
-static void
-close_connection(int fd)
+// Function: close_connection
+// Close the client connection that uses the given file descriptor.
+static void servclose_connection(int fd)
 {
     client_t *pc = client_find_by_socket(fd);
-    assert(pc != NULL);
-    if (pc) {
-        notify_group_members(pc, 0, 0);
+    assert( pc != NULL );
+    if ( pc != 0 )
+    {
+        notify_group_members(pc,0,0);
         client_delete(pc);
     }
 }
 
-
-/* Function: receive_tcp_traffic
- 
- Receive traffic on the server's TCP port.  There are three types of
- traffic:
- 
- - A refresh request asks the server to re-send the list of group members.
- - An termination message end the session.
- - The introductory (intro) message, which contains the client identity.
- 
- Note that there is not much point using password-protected groups unless
- encryption is enabled on the server connections - see <Security>.
- */
-static long
-receive_tcp_traffic(int sock)
+// Function: receive_tcp_traffic
+// Receive traffic on the server's TCP port.  There are three types of traffic:
+// - A refresh request asks the server to re-send the list of group members.
+// - An termination message end the session.
+// - The introductory (intro) message, which contains the client identity.
+// Note that there is not much point using password-protected groups unless
+// encryption is enabled on the server connections - see <Security>.
+static long receive_tcp_traffic(int sock)
 {
-    long status = 0;
+    long n,status = 0;
     char buf[TCP_MESSAGE_MAX] = "";
-    long n;
     client_t *pc;
-    
-    memclear(buf);
-    
+    //memclear(buf);
+    memset(buf,0,sizeof(buf));
     pc = client_find_by_socket(sock);
-    if (!pc)
+    if ( pc == 0 )
         status = -1;
-    
-    else if ((n = read(sock, buf, sizeof buf - 1)) < 0) {
+    else if ( (n= read(sock,buf,sizeof(buf) - 1)) < 0 )
+    {
         slog_error("read");
         status = -1;
     }
-    else if (n == 0)            /* end of file; connection closed */
+    else if ( n == 0 )            // end of file; connection closed 
         status = -1;
-    
-    else {
-        long span = strcspn(buf, "\r\n"); /* when connection is via telnet */
+    else
+    {
+        long span = strcspn(buf, "\r\n"); // when connection is via telnet
+        //printf("received.(%s)\n",buf);
         buf[span] = '\0';
-        
-        if (buf[0] == '\0')
-            status = 0;         /* ignore empty request (CRLF in telnet)*/
-        
-        else if (buf[0] == '.') /* exit */
+        if ( buf[0] == '\0' )
+            status = 0;         // ignore empty request (CRLF in telnet)
+        else if ( buf[0] == '.' ) // exit 
             status = -1;
-        
-        else if (buf[0] == '=') {
+        else if ( buf[0] == '=' )
+        {
             stgncpy(pc->status, &buf[1], sizeof pc->status);
             notify_group_members(pc, 1, 1);
         }
-        else if (buf[0] == '?') {
-            if (pc->group)
-                status = list(sock, pc->group);
+        else if ( buf[0] == '?' )
+        {
+            if ( pc->group != 0 )
+                status = list(sock,pc->group);
             else
-                status = send(sock, "introduce yourself\n", 20, 0);
+            {
+                //printf("send introduce\n");
+                status = send(sock,"introduce yourself\n",strlen("introduce yourself\n"),0);
+            }
         }
-        else if (!is_printable(buf))
-            status = send(sock, "illegal character\n", 19, 0);
-        
-        else if (pc->user[0])
-            status = send(sock, "already introduced\n", 20, 0);
-        
-        else {
+        else if ( is_printable(buf) == 0 )
+        {
+            printf("illegal char in (%s)\n",buf);
+            status = send(sock,"illegal character\n",strlen("illegal character\n"),0);
+        }
+        else if ( pc->user[0] != 0 )
+        {
+            printf("already introduced (%s)\n",pc->user);
+            status = send(sock,"already introduced\n",strlen("already introduced\n"), 0);
+        }
+        else
+        {
             buf[n] = '\0';
-            status = intro(pc, buf);
+            status = intro(pc,buf);
+            printf("intro status.%ld id.(%s)\n",status,pc->id);
         }
     }
-    return status;
+    //printf("receive_tcp_traffic returns %ld\n",status);
+    return(status);
 }
 
-
-/* Function: get_fdset
- 
- Fill an fdset for select() with the descriptors of all open sockets.
- */
-static int
-get_fdset(int server_tcp, int server_udp, fd_set *fdset)
+// Function: get_fdset
+// Fill an fdset for select() with the descriptors of all open sockets.
+static int servget_fdset(int server_tcp,int server_udp,fd_set *fdset)
 {
     int max = 0;
     client_t *pc = client_list;
-    
     FD_ZERO(fdset);
-    FD_SET(server_tcp, fdset);
-    FD_SET(server_udp, fdset);
-    max = maxfd(server_tcp, server_udp);
-    
-    while (pc) {
-        FD_SET(pc->sock, fdset);
-        max = maxfd(max, pc->sock);
+    if ( server_tcp >= 0 )
+        FD_SET(server_tcp,fdset);
+    if ( server_udp >= 0 )
+        FD_SET(server_udp,fdset);
+    max = maxfd(server_tcp,server_udp);
+    while ( pc != 0 )
+    {
+        if ( pc->sock >= 0 )
+            FD_SET(pc->sock,fdset);
+        max = maxfd(max,pc->sock);
         pc = pc->next;
     }
-    return max;
+    return(max);
 }
 
-
-/* Function: serve
- 
- The main server function in which TCP and UDP ports are monitored and
- connections/traffic dispatched to handlers.
- */
-static int
-serve(int tcp, int udp)
+// Function: serve
+// The main server function in which TCP and UDP ports are monitored and connections/traffic dispatched to handlers.
+static int serve(int tcp,int udp)
 {
+    struct timeval timeout;
     fd_set fdset;
-    int fd;
-    int s;
-    int maxfd = get_fdset(tcp, udp, &fdset);
-    
-    if ((s = select(maxfd+1, &fdset, NULL, NULL, NULL)) < 0) {
+    int fd,s,maxfd = servget_fdset(tcp,udp,&fdset);
+    timeout.tv_sec  = 10;//Global_mp->corresponding ? PING_INTERVAL : 60;
+    timeout.tv_usec = 0;
+    if ( (s= select(maxfd+1,&fdset,NULL,NULL,&timeout)) < 0 )
         slog_error("select");
-    }
-    
-    for (fd = 0; (s > 0) && (fd < FD_SETSIZE); ++fd) {
-        
-        if (!FD_ISSET(fd, &fdset))
+    for (fd=0; (s > 0)&&(fd < FD_SETSIZE); ++fd)
+    {
+        if ( FD_ISSET(fd,&fdset) == 0 )
             continue;
         --s;
-        if (fd == tcp)
+        if ( fd == tcp )
             receive_tcp_connection(tcp);
-        
-        else if (fd == udp)
+        else if ( fd == udp )
             receive_udp_punch(udp);
-        
-        else if (receive_tcp_traffic(fd) < 0)
-            close_connection(fd);
+        else if ( receive_tcp_traffic(fd) < 0 )
+        {
+            printf("closing connection %d\n",fd);
+            servclose_connection(fd);
+        }
     }
-    return s;
+    if ( s == 0 )
+        ping_all(Global_mp->NXTADDR,0,0);
+  //printf("serve returns s.%d\n",s);
+    return(s);
 }
 
-
-/* Function: run_server
- 
- Run the server until it returns an error.
- */
-static void
-run_server(unsigned short port)
+// Function: run_server
+// Run the server until it returns an error.
+static void run_server(unsigned short port)
 {
     int udp = make_udp_socket(port);
     int tcp = make_tcp_socket(port);
-    
-    if ((udp >= 0) &&
-        (tcp >= 0))
-        while (serve(tcp, udp) >= 0)
+    if ( udp >= 0 && tcp >= 0 )
+        while ( serve(tcp, udp) >= 0 )
             ;
+    printf("finished run_server\n");
 }
 
-/* Function: get_options
- 
- Get command line options.
- */
-static int
-get_options(int argc, char ** argv)
+// Function: get_options
+// Get command line options.
+static int get_servoptions(int argc, char ** argv)
 {
-    int c;
-    int foreground = 0;
-    
-    while(( c = getopt(argc, argv, "p:fl:g:" )) != EOF )
-        switch (c) {
-            case 'p': rvz_port = (unsigned short) strtoul(optarg,0,0); break;
+    int c,foreground = 0;
+    while( (c= getopt(argc,argv,"p:fl:g:")) != EOF )
+    {
+        switch (c)
+        {
+            //case 'p': rvz_port = (unsigned short) strtoul(optarg,0,0); break;
             case 'f': foreground = 1; break;
             case 'l': log_file = optarg; break;
             case 'g': group_dir = optarg; break;
             default:
-                fprintf(stderr,
-                        "options: "
-                        "[-p port] [-l log-file] [-g group_dir] [-f]\n");
+                fprintf(stderr,"options: [-p port] [-l log-file] [-g group_dir] [-f]\n");
                 exit(EXIT_FAILURE);
         }
-    return foreground;
+    }
+    return(foreground);
 }
 
-
-/* Function: sigchld_handler
- 
- Catch death of SIGCHLD
- */
-static void
-sigchld_handler(int a)
+// Function: sigchld_handler
+// Catch death of SIGCHLD
+static void sigchld_handler(int a)
 {
     (void) a;
     child_died = 1;
 }
 
-
-/* Function: wait_child
- 
- Suspend until child server dies.
- */
-static void
-wait_child(void)
+// Function: wait_child
+// Suspend until child server dies.
+static void wait_child(void)
 {
     sigset_t mask, oldmask;
     int status;
-    
-    /* Set mask to temporarily block SIGCHLD. */
+    // Set mask to temporarily block SIGCHLD
     sigemptyset(&mask);
     sigaddset(&mask, SIGCHLD);
-    
-    /* Wait for SIGCHLD. */
+    // Wait for SIGCHLD.
     sigprocmask(SIG_BLOCK, &mask, &oldmask);
     while (!child_died)
         sigsuspend(&oldmask);
     sigprocmask(SIG_UNBLOCK, &mask, NULL);
-    
     wait(&status);
 }
 
 
-/* Function: main
+// Function: main
  
- The server gets command line options, and (unless the 'foreground' option
- is set) forks to background itself and and disconnects its controlling
- terminal.
+// The server gets command line options, and (unless the 'foreground' option
+// is set) forks to background itself and and disconnects its controlling terminal.
  
- It then forks again to create a child server process where the work is
- done; the parent maintains the server, restarting it if ever it should die.
+// It then forks again to create a child server process where the work is
+// done; the parent maintains the server, restarting it if ever it should die.
  
- The child server creates its public sockets and then loops indefinitely
- serving socket traffic.
- */
+// The child server creates its public sockets and then loops indefinitely serving socket traffic.
 int
-#ifdef __APPLE__
-punchmain(int argc, char ** argv)
-#else
-main(int argc, char ** argv)
-#endif
+//#ifdef __APPLE__
+punch_server_main(int argc, char ** argv)
+//#else
+//main(int argc, char ** argv)
+//#endif
 {
-    int foreground = get_options(argc, argv);
-    long restarted = 0;
-    
-    slog_info("Server starting...");
-    
-    if (foreground)
-        run_server(rvz_port);
-    
-    else {
-        if (fork())
+    int foreground = get_servoptions(argc, argv);
+    printf("Server starting... foreground.%d\n",foreground);
+    if ( foreground != 0 )
+        run_server(NXT_PUNCH_PORT);
+    else
+    {
+        if ( fork() != 0 )
             exit(EXIT_SUCCESS);
         setsid();
-        (void) signal(SIGCHLD, sigchld_handler);
-        
-        while (restarted < 1000) {
+        (void)signal(SIGCHLD,sigchld_handler);
+        while ( 1 )//restarted < 1000 )
+        {
             child_died = 0;
-            
-            if (fork()) {
-                wait_child();       /* parent */
+            if ( fork() != 0 )
+            {
+                wait_child();       // parent 
                 slog_info("Server died.  Restarting in 5 seconds...");
                 sleep(5);
             }
-            else {
-                run_server(rvz_port);
+            else
+            {
+                run_server(NXT_PUNCH_PORT);
                 break;
             }
         }
     }
     return EXIT_FAILURE;
+}
+
+void *punch_server_glue(void *_ptr)
+{
+    //char **args = _ptr;
+    run_server(NXT_PUNCH_PORT);
+    return(0);
 }
