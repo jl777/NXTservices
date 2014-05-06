@@ -7,6 +7,9 @@
 #ifndef gateway_NXTprotocol_h
 #define gateway_NXTprotocol_h
 
+#define SYNC_MAXUNREPORTED 32
+#define SYNC_FRAGSIZE 1024
+
 struct NXT_guid
 {
     struct NXT_str H;
@@ -37,14 +40,26 @@ struct NXT_asset
     int32_t max,num;
 };
 
+struct udp_info { uint64_t nxt64bits; uint32_t ipbits; uint16_t port; };
+#define SET_UDPINFO(up,bits,addr) ((up)->nxt64bits = bits, (up)->ipbits = calc_ipbits(inet_ntoa((addr)->sin_addr)), (up)->port = ntohs((addr)->sin_port))
+
 struct NXT_acct
 {
     struct NXT_str H;
     struct coin_acct *coinaccts;
     struct NXT_asset **assets;
     uint64_t *quantities;
-    int32_t maxassets,numassets,numcoinaccts;
     struct NXT_assettxid_list **txlists;    // one list for each asset in acct
+    int32_t maxassets,numassets,numcoinaccts;
+    // fields for NXTorrent
+    double hisfeedbacks[6],myfb_tohim[6];    // stats on feedbacks given
+    // fields for RT comms
+    int32_t Usock,recvid,sentid;
+    struct sockaddr Uaddr;
+    struct udp_info U;
+    char dispname[128];
+    unsigned char pubkey[crypto_box_PUBLICKEYBYTES];
+    uint32_t memcrcs[SYNC_MAXUNREPORTED],localcrcs[SYNC_MAXUNREPORTED];
 };
 
 
