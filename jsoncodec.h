@@ -8,7 +8,7 @@
 #ifndef gateway_jsoncodec_h
 #define gateway_jsoncodec_h
 
-#include <zlib.h>
+//#include <zlib.h>
 struct compressed_json { uint32_t complen,sublen,origlen; unsigned char encoded[]; };
 
 
