@@ -1,17 +1,15 @@
 //
 //  NXTmembers.h
-//  Created by jl777, April 26-29 2014
+//  Created by jl777, April 26-27 2014
 //  MIT License
 //
 // todo: merge client with member with NXTacct
 
 #ifndef gateway_NXTmembers_h
 #define gateway_NXTmembers_h
-#include <dirent.h>
-#include <sys/stat.h>
 
 static char *group_dir = NULL;
-static time_t group_dir_read;
+ time_t group_dir_read;
 static struct group *group_list;
 static client_t *client_list;
 static int n_clients;
@@ -152,7 +150,7 @@ static char *group_file_read(const char *filename)
     static char pw[NAME_SIZE+1];
     char path[128],*s;
     FILE *f;
-    int n = snprintf(path, sizeof path, "%s/%s",group_dir,filename);
+    int n = sprintf(path,  "%s/%s",group_dir,filename);
     if ( n >= (int)sizeof(path) )
     {
         slog("group file path too long: %s/%s\n",group_dir,filename);
@@ -209,7 +207,7 @@ static void group_add_perm(const char *name)
         pg->n_members = 1;
 }
 
-
+#ifdef ENABLE_DIRENT
 // Function: group_dir_changed
 // Return non-zero if the group directory has changed.
 static int group_dir_changed(void)
@@ -243,14 +241,17 @@ static void group_dir_add(void)
         closedir(dirp);
     }
 }
+#endif
 
 // Function: group_find
 // Find the named group, ignoring characters beyond the end of the allowed name size.
 group_t *group_find(const char *group)
 {
     group_t *pg;
-    if ( group_dir_changed() != 0 )
+#ifdef ENABLE_DIRENT
+   if ( group_dir_changed() != 0 ) // jl777: disabled to make windows compatibility easier
         group_dir_add();        // changes group_list
+#endif
     pg = group_list;
     while ( pg != 0 )
     {
@@ -318,7 +319,7 @@ static const char *create_connection_id(char *id,int max,unsigned long count)
 {
     struct timeval tv;
     gettimeofday(&tv, NULL);
-    snprintf(id,max,"id:%d-%ld",(int)tv.tv_usec,count);
+    sprintf(id,"id:%d-%ld",(int)tv.tv_usec,count);
     printf("created connection_id.(%s)\n",id);
     return(id);
 }
@@ -382,6 +383,8 @@ static member_t *member_create(char *groupname,const char *name,const char *NXTa
         // link to global list
         pm->next = member_list;
         pm->prev = NULL;
+        pm->memfragments = SYNC_MAXUNREPORTED;
+        pm->memincr = SYNC_FRAGSIZE;
         member_list = pm;
         if ( pm->next != 0 )
             pm->next->prev = pm;
@@ -423,6 +426,7 @@ static void member_del(char *s)
     {
         member_t *prev = pm->prev;
         member_t *next = pm->next;
+        clear_pending_sync_files(pm);
         punch_cancel(pm);
         free(pm);
         if ( prev != 0 )
@@ -458,10 +462,9 @@ static void send_one(char *text)
         if ( text[0] == '"' && text[strlen(text)-1] == '"' )
         {
             text[strlen(text)-1] = 0;
-            start_send_file(pm,text+1);
+            start_send_file(pm,pm->name,text+1);
         }
-        else
-            correspond(pm,text,strlen(text) + 1,0);
+        else correspond(pm,text,strlen(text) + 1,SYNC_SENDTEXT);
     }
 }
 
@@ -477,7 +480,7 @@ static int send_all(char *text)
         if ( pm->have_address != 0 )
         {
             ++n;
-            correspond(pm,text,len,0);
+            correspond(pm,text,len,SYNC_SENDTEXT);
         }
         pm = pm->next;
     }
@@ -493,10 +496,8 @@ static void ping_all(char *NXTaddr,char *servername,char *connect_id)
     member_t *pm = member_list;
     while ( pm != 0 )
     {
-        if ( pm->have_address != 0 )
+        if ( pm->have_address != 0 && strcmp(pm->NXTaddr,Global_mp->NXTADDR) != 0 )
             ping(pm,NXTaddr,-1,0);
-        //if ( pm->ping_nr == 0 && servername != 0 && connect_id != 0 && strcmp(NXTaddr,Global_mp->NXTADDR) != 0 )
-        //    punch(pm,PUNCH_INITIATE,servername,connect_id);
         pm = pm->next;
     }
 }
