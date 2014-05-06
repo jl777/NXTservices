@@ -5,21 +5,20 @@
 
 #ifndef NXTAPI_NXTsock_h
 #define NXTAPI_NXTsock_h
-#include <sys/socket.h>
 
 typedef int32_t (*handler)();
-struct server_request_header { int32_t retsize,argsize,variant,funcid __attribute__ ((packed)); };
+struct server_request_header { int32_t retsize,argsize,variant,funcid; };
 struct handler_info { handler variant_handler; int32_t variant,funcid; long argsize,retsize; char **whitelist; };
 struct server_request
 {
-	struct server_request_header H __attribute__ ((packed));
-    int32_t timestamp,coinid,srcgateway,destgateway,numinputs,isforging __attribute__ ((packed));
+	struct server_request_header H;
+    int32_t timestamp,coinid,srcgateway,destgateway,numinputs,isforging;
     char NXTaddr[MAX_NXTADDR_LEN];
 };
 
 struct server_response
 {
-	struct server_request_header H __attribute__ ((packed));
+	struct server_request_header H;
     int32_t retsize,numips,numnxtaccts,coinid;
     int64_t nodeshares,current_nodecoins,nodecoins,nodecoins_sent;
 };
@@ -194,7 +193,7 @@ int32_t server_request(int32_t *sdp,char *destserver,struct server_request_heade
         if ( rc != 0 )
         {
             printf("Host not found --> %s\n", gai_strerror((int)rc));
-            if (rc == EAI_SYSTEM)
+            //if (rc == EAI_SYSTEM)
                 printf("getaddrinfo() failed\n");
             *sdp = -1;
             //pthread_mutex_unlock(&mutex);
@@ -224,7 +223,7 @@ int32_t server_request(int32_t *sdp,char *destserver,struct server_request_heade
             freeaddrinfo(res);
     }
     //printf("send %d req %d bytes from variant.%d\n",*sdp,req->argsize,variant);
-    if ( (rc = (int)send(*sdp,req,req->argsize,0)) < 0 )
+    if ( (rc = (int)send(*sdp,(char *)req,req->argsize,0)) < 0 )
     {
         printf("send(%d) request failed\n",variant);
         close(*sdp);
@@ -250,14 +249,14 @@ int32_t server_request(int32_t *sdp,char *destserver,struct server_request_heade
 
 int32_t wait_for_client(int32_t *sdp,char str[INET6_ADDRSTRLEN],int32_t variant)
 {
-	struct sockaddr_in6 serveraddr, clientaddr;
+	struct sockaddr_in serveraddr, clientaddr;
 	socklen_t addrlen = sizeof(clientaddr);
 	int32_t sdconn = -1;
     str[0] = 0;
 	//get_lockid(0);
 	while ( *sdp < 0 )
 	{
-		if ((*sdp = socket(AF_INET6, SOCK_STREAM, 0)) < 0)
+		if ((*sdp = socket(AF_INET, SOCK_STREAM, 0)) < 0)
 		{
 			perror("socket() failed");
 			break;
@@ -266,16 +265,16 @@ int32_t wait_for_client(int32_t *sdp,char str[INET6_ADDRSTRLEN],int32_t variant)
          {
          perror("setsockopt(SO_REUSEADDR) failed");
          close(sd);
-         sd = -1;
+         sd = -1;in
          break;
          }*/
 		memset(&serveraddr, 0, sizeof(serveraddr));
-		serveraddr.sin6_family = AF_INET6;
-		serveraddr.sin6_port   = htons(SERVER_PORT+variant);
-		serveraddr.sin6_addr   = in6addr_any;
+		serveraddr.sin_family = AF_INET;
+		serveraddr.sin_port   = htons(SERVER_PORT+variant);
+		//serveraddr.sin_addr   = in6addr_any;
 		if ( bind(*sdp,(struct sockaddr *)&serveraddr,sizeof(serveraddr)) < 0 )
 		{
-			printf("failed to bind %s variant.%d\n",(char *)&serveraddr.sin6_addr,variant);
+			printf("failed to bind %s variant.%d\n",(char *)&serveraddr.sin_addr,variant);
 			perror("variant bind() failed");
 			close(*sdp);
 			*sdp = -1;
@@ -304,9 +303,10 @@ int32_t wait_for_client(int32_t *sdp,char str[INET6_ADDRSTRLEN],int32_t variant)
 		else
 		{
 			getpeername(sdconn, (struct sockaddr *)&clientaddr,&addrlen);
-			if ( inet_ntop(AF_INET6, &clientaddr.sin6_addr, str, INET6_ADDRSTRLEN) != 0 )
+			if ( inet_ntop(AF_INET, &clientaddr.sin_addr, str, INET_ADDRSTRLEN) != 0 )
+              //  if ( inet_ntop(AF_INET6, &clientaddr.sin6_addr, str, INET6_ADDRSTRLEN) != 0 )
 			{
-                //printf("variant.%d [Client address is %20s | Client port is %6d] sdconn.%d\n",variant,str,ntohs(clientaddr.sin6_port),sdconn);
+                printf("variant.%d [Client address is %20s | Client port is %6d] sdconn.%d\n",variant,str,ntohs(clientaddr.sin_port),sdconn);
 			} else printf("Error getting client str\n");
 		}
 	}
@@ -379,7 +379,7 @@ void *_server_loop(void *_args)
                 if ( req->retsize > 0 )
                 {
                     //printf("return %d to %s for variant.%d funcid.%d\n",req->retsize,clientip,(int)variant,req->funcid);
-                    if ( (rc = (int)send(sdconn,req,req->retsize,0)) < req->retsize )
+                    if ( (rc = (int)send(sdconn,(char *)req,req->retsize,0)) < req->retsize )
                     {
                         printf("send() failed? rc.%d instead of %d\n",rc,req->retsize);
                         break;
