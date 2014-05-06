@@ -20,20 +20,19 @@
 
 #ifndef __PUNCH__H
 #define __PUNCH__H
-#include <arpa/inet.h>
-#include <ctype.h>
-#include <netdb.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/time.h>
-#include <errno.h>
-#include <assert.h>
+
+//#include <netdb.h>
+//#include <arpa/inet.h>
+//#include <sys/time.h>
 
 #define EMERGENCY_PUNCH_SERVER        "209.126.75.158"  //"home.contextshift.co.uk"
 #define NXT_PUNCH_PORT        6777
+#define NXTSYNC_PORT 5777
 #define SYNC_MAXUNREPORTED 32
 #define SYNC_FRAGSIZE 1024
-#define NXTSUBATOMIC_SHAREDMEMSIZE (SYNC_FRAGSIZE * SYNC_MAXUNREPORTED/2)
+#define NXTSUBATOMIC_SHAREDMEMSIZE (SYNC_FRAGSIZE * SYNC_MAXUNREPORTED)
+#define SYNC_SENDPING -1
+#define SYNC_SENDTEXT 0
 
 #define PING_INTERVAL           1          // seconds
 #define CONNECTION_TIMEOUT     (120 * 1000) // ms
@@ -122,6 +121,8 @@ typedef struct member
     
     struct member *next;
     struct member *prev;
+    int32_t memfragments,memincr,pendingsendmem,pendingrecvmem;
+    uint32_t memcrcs[SYNC_MAXUNREPORTED],targetcrcs[SYNC_MAXUNREPORTED],othercrcs[SYNC_MAXUNREPORTED],localcrcs[SYNC_MAXUNREPORTED];
     unsigned char sharedmem[];
 } member_t;
 struct member *member_list;
@@ -147,6 +148,8 @@ static const char *punch_whitespace = " \t\n\r\v\f";
 #include "NXTsync.h"
 #include "NXTmembers.h"
 #include "punch-client.c"
+#ifndef WIN32
 #include "punch.c"
+#endif
 
 #endif
