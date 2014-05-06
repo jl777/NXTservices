@@ -98,10 +98,10 @@ extern "C"
     extern cJSON *cJSON_CreateObject(void);
     
     /* These utilities create an Array of count items. */
-    extern cJSON *cJSON_CreateIntArray(const int64_t *numbers,int32_t count);
-    extern cJSON *cJSON_CreateFloatArray(const float *numbers,int32_t count);
-    extern cJSON *cJSON_CreateDoubleArray(const double *numbers,int32_t count);
-    extern cJSON *cJSON_CreateStringArray(const char **strings,int32_t count);
+    extern cJSON *cJSON_CreateIntArray(int64_t *numbers,int32_t count);
+    extern cJSON *cJSON_CreateFloatArray(float *numbers,int32_t count);
+    extern cJSON *cJSON_CreateDoubleArray(double *numbers,int32_t count);
+    extern cJSON *cJSON_CreateStringArray(char **strings,int32_t count);
     
     /* Append item to the specified array/object. */
     extern void cJSON_AddItemToArray(cJSON *array, cJSON *item);
