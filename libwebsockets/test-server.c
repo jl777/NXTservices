@@ -234,9 +234,9 @@ static int callback_http(struct libwebsocket_context *context,struct libwebsocke
             if ( (nxtprotocol= get_NXTprotocol((char *)in)) != 0 )
             {
                 char *retstr;
-                strncpy(dispstr,(char *)NXTprotocol_parms,sizeof(dispstr)-1);
-                dispstr[sizeof(dispstr)-1] = 0;
-                mylen = strlen(dispstr);
+                //strncpy(dispstr,(char *)NXTprotocol_parms,sizeof(dispstr)-1);
+                //dispstr[sizeof(dispstr)-1] = 0;
+                //mylen = strlen(dispstr);
                 //sprintf((char *)dispstr,"%s API.(%s) ->\n",(char *)in+1,parms);
                 //libwebsocket_write(wsi,NXTprotocol_parms,strlen((char *)NXTprotocol_parms),LWS_WRITE_HTTP); breaks as only one write seems to be allowed
 
@@ -244,12 +244,12 @@ static int callback_http(struct libwebsocket_context *context,struct libwebsocke
                 if ( retstr != 0 )
                 {
 //printf("NXTprotocol %s.(%s) -> (%s)\n",(char *)in,NXTprotocol_parms,retstr);
-                    if ( sizeof(dispstr)-mylen-strlen((char *)in)-strlen(retstr)-64 > 0 )
+                    /*if ( sizeof(dispstr)-mylen-strlen((char *)in)-strlen(retstr)-64 > 0 )
                     {
                         strcat((char *)dispstr,(char *)in+1);
                         strcat((char *)dispstr,"API ->\n");
                         strcat((char *)dispstr,(char *)retstr);
-                    } else strcpy(dispstr,"dispstr overflowed");
+                    } else strcpy(dispstr,"dispstr overflowed");*/
                     libwebsocket_write(wsi,(unsigned char *)retstr,strlen(retstr),LWS_WRITE_HTTP);
                 }
                 return(-1);
@@ -261,13 +261,14 @@ static int callback_http(struct libwebsocket_context *context,struct libwebsocke
                 {
                     printf("loaded NXTprotocol, len.%ld + forms.%ld\n",(long)mylen,strlen(testforms));
                     if ( URL_changed == 0 )
-                        mylen += strlen(testforms);
+                        len = mylen + strlen(testforms);
+                    else len = mylen;
                     sprintf((char *)buffer,
                             "HTTP/1.0 200 OK\x0d\x0a"
                             "Server: NXTprotocol.jl777\x0d\x0a"
                             "Content-Type: text/html\x0d\x0a"
                             "Content-Length: %u\x0d\x0a\x0d\x0a",
-                            (unsigned int)mylen);
+                            (unsigned int)len);
                     libwebsocket_write(wsi,buffer,strlen((char *)buffer),LWS_WRITE_HTTP);
                     if ( URL_changed == 0 && testforms[0] != 0 )
                        libwebsocket_write(wsi,(unsigned char *)testforms,strlen(testforms),LWS_WRITE_HTTP);
@@ -277,7 +278,7 @@ static int callback_http(struct libwebsocket_context *context,struct libwebsocke
                 else if ( URL_changed == 0 && testforms[0] != 0 )
                 {
                     mylen = strlen(testforms);
-                    printf("couldnt load.(%s), testforms len %ld\n",NXTPROTOCOL_HTMLFILE,(long)mylen);
+                    //printf("couldnt load.(%s), testforms len %ld\n",NXTPROTOCOL_HTMLFILE,(long)mylen);
                     if ( mylen != 0 )
                     {
                         sprintf((char *)buffer,
@@ -526,16 +527,17 @@ callback_dumb_increment(struct libwebsocket_context *context,
             if ( n > 0 )
             {
                 m = libwebsocket_write(wsi, (unsigned char *)dispstr, n, LWS_WRITE_TEXT);
+                //printf("wrote (%s).%d to wsi, got %d\n",dispstr,n,m);
                 if (m < n) {
                     lwsl_err("ERROR %d writing to di socket\n", n);
                     return -1;
                 }
             }
-		if (close_testing && pss->number == 50) {
-			lwsl_info("close tesing limit, closing\n");
-			return -1;
-		}
-		break;
+            /*if ( close_testing && pss->number == 50 ) {
+                lwsl_info("close tesing limit, closing\n");
+                return -1;
+            }*/
+            break;
 
 	case LWS_CALLBACK_RECEIVE:
 //		fprintf(stderr, "rx %d\n", (int)len);
@@ -723,7 +725,7 @@ static struct libwebsocket_protocols protocols[] = {
 		"dumb-increment-protocol",
 		callback_dumb_increment,
 		sizeof(struct per_session_data__dumb_increment),
-		10,
+		65536,
 	},
 	{
 		"lws-mirror-protocol",
@@ -774,7 +776,7 @@ int main(int argc, char **argv)
 #ifndef LWS_NO_DAEMONIZE
 	int daemonize = 0;
 #endif
-    init_NXTprotocol();
+    init_NXTprotocol(argc,argv);
 	memset(&info, 0, sizeof info);
 	info.port = LIBWEBSOCKETS_PORT;
 
