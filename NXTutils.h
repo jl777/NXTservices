@@ -26,7 +26,7 @@ char *load_file(char *fname,char **bufp,int64_t  *lenp,int64_t  *allocsizep)
         if ( filesize > buflen-1 )
         {
             *allocsizep = filesize+1;
-            *bufp = buf = realloc(buf,*allocsizep);
+            *bufp = buf = realloc(buf,(long)*allocsizep);
             //buflen = filesize+1;
         }
         rewind(fp);
@@ -34,7 +34,7 @@ char *load_file(char *fname,char **bufp,int64_t  *lenp,int64_t  *allocsizep)
             printf("Null buf ???\n");
         else
         {
-            if ( fread(buf,1,filesize,fp) != (unsigned long)filesize )
+            if ( fread(buf,1,(long)filesize,fp) != (unsigned long)filesize )
                 printf("error reading filesize.%ld\n",(long)filesize);
             buf[filesize] = 0;
         }
@@ -45,6 +45,7 @@ char *load_file(char *fname,char **bufp,int64_t  *lenp,int64_t  *allocsizep)
     return(buf);
 }
 
+#ifndef WIN32
 char *_issue_cmd_to_buffer(char *prog,char *arg1,char *arg2,char *arg3)
 {
     char buffer[4096],cmd[512];
@@ -94,7 +95,7 @@ char *_issue_cmd_to_buffer(char *prog,char *arg1,char *arg2,char *arg3)
     return(0);
 }
 
-char *get_ipaddr()
+char *oldget_ipaddr()
 {
     static char *ipaddr;
     char *devs[] = { "eth0", "em1" };
@@ -118,6 +119,43 @@ char *get_ipaddr()
     }
     ipaddr = clonestr("127.0.0.1");
     return(ipaddr);
+}
+#endif
+
+char *get_ipaddr()
+{
+    static char *_ipaddr;
+    char *ipsrcs[] = { "http://ip-api.com/json", "http://ip.jsontest.com/?showMyIP", "http://www.telize.com/jsonip", "http://www.trackip.net/ip?json"};
+    int32_t i,match = 1;
+    cJSON *json,*obj;
+    char *jsonstr,ipaddr[512],str[512];
+    if ( _ipaddr != 0 )
+        return(_ipaddr);
+    ipaddr[0] = 0;
+    for (i=0; i<(int)(sizeof(ipsrcs)/sizeof(*ipsrcs)); i++)
+    {
+        jsonstr = issue_curl(ipsrcs[i]);
+        if ( jsonstr != 0 )
+        {
+            json = cJSON_Parse(jsonstr);
+            if ( json != 0 )
+            {
+                obj = cJSON_GetObjectItem(json,(i==0)?"query":"ip");
+                copy_cJSON(str,obj);
+                printf("(%s) ",str);
+                if ( strcmp(str,ipaddr) != 0 )
+                    strcpy(ipaddr,str);
+                else match++;
+                free_json(json);
+            }
+            free(jsonstr);
+        }
+    }
+    if ( match != i )
+        printf("-> (%s) ipaddr matches.%d vs queries.%d\n",ipaddr,match,i);
+    if ( ipaddr[0] != 0 )
+        _ipaddr = clonestr(ipaddr);
+    return(_ipaddr);
 }
 
 char *choose_poolserver(char *NXTaddr)
@@ -187,7 +225,7 @@ union NXTtype extract_NXTfield(char *origoutput,char *cmd,char *field,int32_t ty
                         case -(int)sizeof(int32_t):
                             retval.val = atoi(output);
                             break;
-                        case -(int)sizeof(long):
+                        case -(int)sizeof(int64_t):
                             retval.lval = atol(output);
                             break;
                         case 64:
@@ -225,6 +263,7 @@ uint64_t issue_getAccountId(char *password)
     char cmd[4096];
     union NXTtype ret;
     sprintf(cmd,"%s=getAccountId&secretPhrase=%s",NXTSERVER,password);
+    //printf("(%s) ->(%s)\n",cmd,issue_curl(cmd));
     ret = extract_NXTfield(0,cmd,"accountId",64);
     return(ret.nxt64bits);
 }
@@ -236,6 +275,21 @@ int32_t issue_startForging(char *secret)
     sprintf(cmd,"%s=startForging&secretPhrase=%s",NXTSERVER,secret);
     ret = extract_NXTfield(0,cmd,"deadline",sizeof(int32_t));
     return(ret.val);
+}
+
+char *issue_broadcastTransaction(char *txbytes)
+{
+    char cmd[4096];
+    sprintf(cmd,"%s=broadcastTransaction&secretPhrase=%s&transactionBytes=%s",NXTSERVER,Global_mp->NXTACCTSECRET,txbytes);
+    return(issue_curl(cmd));
+}
+
+
+char *issue_signTransaction(char *txbytes)
+{
+    char cmd[4096];
+    sprintf(cmd,"%s=signTransaction&secretPhrase=%s&unsignedTransactionBytes=%s",NXTSERVER,Global_mp->NXTACCTSECRET,txbytes);
+    return(issue_curl(cmd));
 }
 
 uint64_t issue_transferAsset(char *secret,char *recipient,char *asset,int64_t quantity,int64_t feeNQT,int32_t deadline,char *comment)
@@ -267,6 +321,40 @@ uint64_t issue_transferAsset(char *secret,char *recipient,char *asset,int64_t qu
         free(jsontxt);
     }
     return(txid);
+}
+
+cJSON *issue_getAccountInfo(int64_t *amountp,char *name,char *username,char *NXTaddr,char *groupname)
+{
+    union NXTtype retval;
+    cJSON *obj,*json = 0;
+    char buf[2048];
+    *amountp = 0;
+    sprintf(buf,"%s=getAccount&account=%s",NXTSERVER,NXTaddr);
+    retval = extract_NXTfield(0,buf,0,0);
+    if ( retval.json != 0 )
+    {
+        printf("%s\n",cJSON_Print(retval.json));
+        obj = cJSON_GetObjectItem(retval.json,"balanceNQT");
+        copy_cJSON(buf,obj);
+        *amountp = atol(buf);
+        obj = cJSON_GetObjectItem(retval.json,"name");
+        copy_cJSON(name,obj);
+        obj = cJSON_GetObjectItem(retval.json,"description");
+        copy_cJSON(buf,obj);
+        replace_backslashquotes(buf);
+        json = cJSON_Parse(buf);
+        if ( json != 0 )
+        {
+            //printf("%s\n",cJSON_Print(json));
+            obj = cJSON_GetObjectItem(json,"username");
+            copy_cJSON(username,obj);
+            obj = cJSON_GetObjectItem(json,"group");
+            copy_cJSON(groupname,obj);
+            printf("name.%s username.%s groupname.%s\n%s\n",name,username,cJSON_Print(json),groupname);
+        }
+        free_json(retval.json);
+    }
+    return(json);
 }
 
 int64_t get_coin_quantity(int64_t *unconfirmedp,int32_t coinid,char *NXTaddr)
@@ -322,6 +410,30 @@ char *issue_getTransaction(char *txidstr)
         //retstr = parse_NXTresults(0,"sender","",results_processor,jsonstr,strlen(jsonstr));
         free(jsonstr);
     } else printf("error getting txid.%s\n",txidstr);
+    return(retstr);
+}
+
+char *issue_calculateFullHash(char *unsignedtxbytes,char *sighash)
+{
+    char cmd[4096],buf[512];
+    union NXTtype ret;
+    sprintf(cmd,"%s=calculateFullHash&unsignedTransactionBytes=%s&signatureHash=%s",NXTSERVER,unsignedtxbytes,sighash);
+    ret = extract_NXTfield(buf,cmd,"fullHash",0);
+    //printf("calculated.(%s)\n",ret.str);
+    return(ret.str);
+}
+
+char *issue_parseTransaction(char *txbytes)
+{
+    char cmd[4096],*retstr = 0;
+    sprintf(cmd,"%s=parseTransaction&transactionBytes=%s",NXTSERVER,txbytes);
+    retstr = issue_curl(cmd);
+    //printf("issue_parseTransaction.%s %s\n",txbytes,retstr);
+    if ( retstr != 0 )
+    {
+        //retstr = parse_NXTresults(0,"sender","",results_processor,jsonstr,strlen(jsonstr));
+        //free(jsonstr);
+    } else printf("error getting txbytes.%s\n",txbytes);
     return(retstr);
 }
 
@@ -473,7 +585,7 @@ int32_t set_json_AM(struct json_AM *ap,int32_t sig,int32_t funcid,char *nxtaddr,
     if ( nxtaddr != 0 )
     {
         ap->H.nxt64bits = calc_nxt64bits(nxtaddr);
-        printf("NXT.%s -> %s %lx\n",nxtaddr,nxt64str(ap->H.nxt64bits),(long)ap->H.nxt64bits);
+        //printf("set_json_AM: NXT.%s -> %s %lx\n",nxtaddr,nxt64str(ap->H.nxt64bits),(long)ap->H.nxt64bits);
     }
     ap->funcid = funcid;
     //ap->gatewayid = gp->gatewayid;
@@ -495,7 +607,7 @@ int32_t set_json_AM(struct json_AM *ap,int32_t sig,int32_t funcid,char *nxtaddr,
             free(teststr);
         }
     }
-    printf("AM len.%ld vs %ld (%s)\n",len,strlen(ap->jsonstr),ap->jsonstr);
+    //printf("AM len.%ld vs %ld (%s)\n",len,strlen(ap->jsonstr),ap->jsonstr);
     ap->H.size = (int32_t)len;
     return(0);
 }
@@ -636,9 +748,138 @@ int32_t init_NXTAPI()
 
 struct NXT_acct *get_NXTacct(int32_t *createdp,struct NXThandler_info *mp,char *NXTaddr)
 {
+    struct NXT_acct *np;
     //printf("NXTaccts hash %p\n",mp->NXTaccts_tablep);
     //printf("get_NXTacct.(%s)\n",NXTaddr);
-    return(MTadd_hashtable(createdp,mp->NXTaccts_tablep,NXTaddr));
+    np = MTadd_hashtable(createdp,mp->NXTaccts_tablep,NXTaddr);
+    if ( *createdp != 0 )
+        np->Usock = -1;
+    return(np);
+}
+
+int32_t validate_token(cJSON **argjsonp,char *pubkey,char *tokenizedtxt,char *NXTaddr,char *name,int32_t strictflag)
+{
+    cJSON *acctjson,*array,*firstitem=0,*tokenobj,*obj;
+    int64_t amount,timeval,diff = 0;
+    int32_t valid,retcode = -13;
+    char buf[1024],NXTname[1024],username[1024],groupname[1024],sender[MAX_NXTADDR_LEN],encoded[1024],*firstjsontxt = 0;
+    acctjson = issue_getAccountInfo(&amount,NXTname,username,NXTaddr,groupname);
+    if ( argjsonp != 0 )
+        *argjsonp = 0;
+    if ( pubkey != 0 )
+        pubkey[0] = 0;
+    if ( acctjson != 0 )
+        free_json(acctjson);
+    if ( strcmp(name,NXTname) != 0 )
+        return(-1);
+    array = cJSON_Parse(tokenizedtxt);
+    if ( array == 0 )
+        return(-2);
+    if ( is_cJSON_Array(array) != 0 && cJSON_GetArraySize(array) == 2 )
+    {
+        firstitem = cJSON_GetArrayItem(array,0);
+        if ( pubkey != 0 )
+        {
+            obj = cJSON_GetObjectItem(firstitem,"pubkey");
+            copy_cJSON(pubkey,obj);
+        }
+        if ( argjsonp != 0 )
+        {
+            *argjsonp = cJSON_GetObjectItem(firstitem,"xfer");
+            if ( 0 && *argjsonp != 0 )
+                printf("%p ARGJSON.(%s)\n",*argjsonp,cJSON_Print(*argjsonp));
+        }
+        obj = cJSON_GetObjectItem(firstitem,"NXT"); copy_cJSON(buf,obj);
+        if ( strcmp(buf,NXTaddr) != 0 )
+            retcode = -3;
+        else
+        {
+            obj = cJSON_GetObjectItem(firstitem,"name"); copy_cJSON(buf,obj);
+            if ( strcmp(buf,name) != 0 )
+                retcode = -4;
+            else
+            {
+                if ( strictflag != 0 )
+                {
+                    timeval = get_cJSON_int(firstitem,"time");
+                    diff = timeval - time(NULL);
+                    if ( diff < 0 )
+                        diff = -diff;
+                    if ( diff > strictflag )
+                    {
+                        printf("time diff %ld too big %ld vs %ld\n",(long)diff,(long)timeval,(long)time(NULL));
+                        retcode = -5;
+                    }
+                }
+                if ( retcode != -5 )
+                {
+                    firstjsontxt = cJSON_Print(firstitem); stripwhite(firstjsontxt,strlen(firstjsontxt));
+                    tokenobj = cJSON_GetArrayItem(array,1);
+                    obj = cJSON_GetObjectItem(tokenobj,"token");
+                    copy_cJSON(encoded,obj);
+                    memset(sender,0,sizeof(sender));
+                    valid = -1;
+                    if ( issue_decodeToken(sender,&valid,firstjsontxt,encoded) > 0 )
+                    {
+                        if ( strcmp(sender,NXTaddr) == 0 )
+                        {
+                            printf("signed by valid NXT.%s valid.%d diff.%ld\n",sender,valid,(long)diff);
+                            retcode = valid;
+                        }
+                    }
+                    if ( retcode < 0 )
+                        printf("err: signed by valid NXT.%s valid.%d diff.%ld\n",sender,valid,(long)diff);
+                    free(firstjsontxt);
+                }
+            }
+        }
+    }
+    if ( retcode >= 0 && firstitem != 0 && argjsonp != 0 && *argjsonp != 0 )
+        *argjsonp = cJSON_DetachItemFromObject(firstitem,"xfer");
+    free_json(array);
+    return(retcode);
+}
+
+char *tokenize_json(cJSON *argjson)
+{
+    char *str,token[NXT_TOKEN_LEN+1];
+    cJSON *array;
+    //printf("SECRET.(%s)\n",Global_mp->NXTACCTSECRET);
+    array = cJSON_CreateArray();
+    cJSON_AddItemToArray(array,argjson);
+
+    str = cJSON_Print(argjson);
+    stripwhite(str,strlen(str));
+    issue_generateToken(token,str,Global_mp->NXTACCTSECRET);
+    token[NXT_TOKEN_LEN] = 0;
+    free(str);
+    argjson = cJSON_CreateObject();
+    cJSON_AddItemToObject(argjson,"token",cJSON_CreateString(token));
+    cJSON_AddItemToArray(array,argjson);
+    
+    str = cJSON_Print(array);
+    stripwhite(str,strlen(str));
+    free_json(array);
+    return(str);
+}
+
+int gen_tokenjson(char *jsonstr,char *user,char *NXTaddr,long nonce,cJSON *argjson)
+{
+    char *str,pubkey[1024];
+    cJSON *json;
+    json = cJSON_CreateObject();
+    cJSON_AddItemToObject(json,"name",cJSON_CreateString(user));
+    cJSON_AddItemToObject(json,"NXT",cJSON_CreateString(NXTaddr));
+    init_hexbytes(pubkey,Global_mp->session_pubkey,sizeof(Global_mp->session_pubkey));
+    cJSON_AddItemToObject(json,"pubkey",cJSON_CreateString(pubkey));
+    cJSON_AddItemToObject(json,"time",cJSON_CreateNumber(nonce));
+    if ( argjson != 0 )
+        cJSON_AddItemToObject(json,"xfer",argjson);
+    str = tokenize_json(json);
+    strcpy(jsonstr,str);
+    free(str);
+    stripwhite(jsonstr,strlen(jsonstr));
+    return((int)strlen(jsonstr));
 }
 
 uint32_t calc_ipbits(char *ipaddr)
@@ -649,7 +890,7 @@ uint32_t calc_ipbits(char *ipaddr)
     {
         printf("malformed ipaddr?.(%s) -> %d %d %d %d\n",ipaddr,a,b,c,d);
     }
-    return((a<<24) | (b<<16) | (c<<8) | d);
+    return((d<<24) | (c<<16) | (b<<8) | a);
 }
 
 void expand_ipbits(char *ipaddr,uint32_t ipbits)
@@ -658,6 +899,13 @@ void expand_ipbits(char *ipaddr,uint32_t ipbits)
 }
 
 char *ipbits_str(uint32_t ipbits)
+{
+    static char ipaddr[32];
+    expand_ipbits(ipaddr,ipbits);
+    return(ipaddr);
+}
+
+char *ipbits_str2(uint32_t ipbits)
 {
     static char ipaddr[32];
     expand_ipbits(ipaddr,ipbits);
@@ -674,9 +922,23 @@ struct sockaddr_in conv_ipbits(uint32_t ipbits,int32_t port)
     server_addr.sin_family = AF_INET;
     server_addr.sin_port = htons(port);
     server_addr.sin_addr = *((struct in_addr *)host->h_addr);
-    bzero(&(server_addr.sin_zero),8);
+    memset(&(server_addr.sin_zero),0,8);
     return(server_addr);
 }
+
+//#ifndef WIN32
+double milliseconds(void)
+{
+    static struct timeval timeval,first_timeval;
+    gettimeofday(&timeval,0);
+    if ( first_timeval.tv_sec == 0 )
+    {
+        first_timeval = timeval;
+        return(0);
+    }
+    return((timeval.tv_sec - first_timeval.tv_sec) * 1000. + (timeval.tv_usec - first_timeval.tv_usec)/1000.);
+}
+//#endif
 
 int64_t microseconds(void)
 {
@@ -753,7 +1015,6 @@ static int _increasing_float(const void *a,const void *b)
 #undef float_a
 #undef float_b
 }
-#endif
 
 int _decreasing_unsignedint64(const void *a,const void *b)
 {
@@ -782,6 +1043,44 @@ int _decreasing_signedint64(const void *a,const void *b)
 }
 
 
+static int _decreasing_double(const void *a,const void *b)
+{
+#define double_a (*(double *)a)
+#define double_b (*(double *)b)
+	if ( double_b > double_a )
+		return(1);
+	else if ( double_b < double_a )
+		return(-1);
+	return(0);
+#undef double_a
+#undef double_b
+}
+
+static int _increasing_double(const void *a,const void *b)
+{
+#define double_a (*(double *)a)
+#define double_b (*(double *)b)
+	if ( double_b > double_a )
+		return(-1);
+	else if ( double_b < double_a )
+		return(1);
+	return(0);
+#undef double_a
+#undef double_b
+}
+
+int32_t revsortds(double *buf,uint32_t num,int32_t size)
+{
+	qsort(buf,num,size,_decreasing_double);
+	return(0);
+}
+
+int32_t sortds(double *buf,uint32_t num,int32_t size)
+{
+	qsort(buf,num,size,_increasing_double);
+	return(0);
+}
+
 int32_t bitweight(uint64_t x)
 {
     int32_t wt,i;
@@ -808,3 +1107,247 @@ void add_nxt64bits_json(cJSON *json,char *field,uint64_t nxt64bits)
         cJSON_AddItemToObject(json,field,obj);
     }
 }
+
+void launch_app_in_new_terminal(char *appname,int argc,char **argv)
+{
+#ifdef __APPLE__
+    FILE *fp;
+    int i;
+    char cmd[2048];
+    if ( (fp= fopen("/tmp/launchit","w")) != 0 )
+    {
+        fprintf(fp,"osascript <<END\n");
+        fprintf(fp,"tell application \"Terminal\"\n");
+        fprintf(fp,"do script \"cd \\\"`pwd`\\\";$1;exit\"\n");
+        fprintf(fp,"end tell\n");
+        fprintf(fp,"END\n");
+        fclose(fp);
+        system("chmod +x /tmp/launchit");
+        sprintf(cmd,"/tmp/launchit \"%s ",appname);
+        for (i=0; argv[i]!=0; i++)
+            sprintf(cmd+strlen(cmd),"%s ",argv[i]);
+        strcat(cmd,"\"");
+        printf("cmd.(%s)\n",cmd);
+        system(cmd);
+    }
+#else
+    void *punch_client_glue(void *argv);
+    if ( pthread_create(malloc(sizeof(pthread_t)),NULL,punch_client_glue,argv) != 0 )
+        printf("ERROR punch_client_glue\n");
+#endif
+}
+
+int search_uint32_ts(int32_t *ints,int32_t val)
+{
+    int i;
+    for (i=0; ints[i]>=0; i++)
+        if ( val == ints[i] )
+            return(0);
+    return(-1);
+}
+
+#ifndef WIN32
+void *map_file(char *fname,uint64_t *filesizep,int32_t enablewrite)
+{
+	void *mmap64(void *addr,size_t len,int prot,int flags,int fildes,off_t off);
+	int fd,rwflags,flags = MAP_FILE|MAP_SHARED;
+	uint64_t filesize;
+    void *ptr = 0;
+	*filesizep = 0;
+	if ( enablewrite != 0 )
+		fd = open(fname,O_RDWR);
+	else
+  		fd = open(fname,O_RDONLY);
+	if ( fd < 0 )
+	{
+		//printf("map_file: error opening enablewrite.%d %s\n",enablewrite,fname);
+        return(0);
+	}
+    if ( *filesizep == 0 )
+        filesize = (uint64_t)lseek(fd,0,SEEK_END);
+    else
+        filesize = *filesizep;
+	rwflags = PROT_READ;
+	if ( enablewrite != 0 )
+		rwflags |= PROT_WRITE;
+#ifdef __APPLE__
+	ptr = mmap(0,filesize,rwflags,flags,fd,0);
+#else
+	ptr = mmap64(0,filesize,rwflags,flags,fd,0);
+#endif
+	close(fd);
+    if ( ptr == 0 || ptr == MAP_FAILED )
+	{
+		printf("map_file.write%d: mapping %s failed? mp %p\n",enablewrite,fname,ptr);
+		return(0);
+	}
+	*filesizep = filesize;
+	return(ptr);
+}
+
+int32_t release_map_file(void *ptr,uint64_t filesize)
+{
+	int32_t retval;
+    if ( ptr == 0 )
+	{
+		printf("release_map_file: null ptr\n");
+		return(-1);
+	}
+	retval = munmap(ptr,filesize);
+	if ( retval != 0 )
+		printf("release_map_file: munmap error %p %ld: err %d\n",ptr,(long)filesize,retval);
+	//else
+	//	printf("released %p %ld\n",ptr,filesize);
+	return(retval);
+}
+#else
+void usleep(int utimeout)
+{
+    utimeout /= 1000;
+    if ( utimeout == 0 )
+        utimeout = 1;
+    Sleep(utimeout);
+}
+
+void sleep(int seconds)
+{
+    Sleep(seconds * 1000);
+}
+
+void *map_file(char *fname,uint64_t *filesizep,int32_t enablewrite)
+{
+    FILE *fp;
+    void *ptr = 0;
+    *filesizep = 0;
+    if ( (fp= fopen(fname,"rb")) != 0 )
+    {
+        fseek(fp,0,SEEK_END);
+        *filesizep = ftell(fp);
+        rewind(fp);
+        fread(ptr,1,(long)*filesizep,fp);
+        fclose(fp);
+    }
+    return(ptr);
+}
+
+int32_t release_map_file(void *ptr,uint64_t filesize)
+{
+    free(ptr);
+    return(0);
+}
+#endif
+
+uint32_t calc_file_crc(uint64_t *filesizep,char *fname)
+{
+    void *ptr;
+    uint32_t totalcrc = 0;
+#ifdef WIN32
+    FILE *fp;
+    *filesizep = 0;
+    if ( (fp= fopen(fname,"rb")) != 0 )
+    {
+        fseek(fp,0,SEEK_END);
+        *filesizep = ftell(fp);
+        rewind(fp);
+        ptr = malloc((long)*filesizep);
+        fread(ptr,1,(long)*filesizep,fp);
+        fclose(fp);
+        totalcrc = _crc32(0,ptr,(long)*filesizep);
+    }
+#else
+    uint32_t enablewrite = 0;
+    ptr = map_file(fname,filesizep,enablewrite);
+    if ( ptr != 0 )
+    {
+        totalcrc = _crc32(0,ptr,(long)*filesizep);
+        release_map_file(ptr,(long)*filesizep);
+    }
+#endif
+    return(totalcrc);
+}
+
+cJSON *parse_json_AM(struct json_AM *ap)
+{
+    char *jsontxt;
+    if ( ap->jsonflag != 0 )
+    {
+        jsontxt = (ap->jsonflag == 1) ? ap->jsonstr : decode_json(&ap->jsn,ap->jsonflag);
+        if ( jsontxt != 0 )
+        {
+            if ( jsontxt[0] == '"' && jsontxt[strlen(jsontxt)-1] == '"' )
+                replace_backslashquotes(jsontxt);
+            return(cJSON_Parse(jsontxt));
+        }
+    }
+    return(0);
+}
+
+int32_t is_valid_NXTtxid(char *txid)
+{
+    long i,len;
+    if ( txid == 0 )
+        return(0);
+    len = strlen(txid);
+    if ( len < 6 )
+        return(0);
+    for (i=0; i<len; i++)
+        if ( txid[i] < '0' || txid[i] > '9' )
+            break;
+    if ( i != len )
+        return(0);
+    return(1);
+}
+
+double calc_dpreds(double dpreds[6])
+{
+    double sum,net,both;
+	sum = (dpreds[0] + dpreds[2]);
+	net = (dpreds[1] - dpreds[3]);
+	both = MAX(1,(dpreds[1] + dpreds[3]));
+	//return(sum/both);
+	if ( net*sum > 0 )
+		return((net * fabs(sum))/(both * both));
+	else return(0.);
+}
+
+double calc_dpreds_ave(double dpreds[6])
+{
+    double sum,both;
+	sum = (dpreds[0] + dpreds[2]);
+	both = MAX(1,(dpreds[1] + dpreds[3]));
+	return(sum/both);
+}
+
+double calc_dpreds_abs(double dpreds[6])
+{
+    double both;
+	both = (dpreds[1] + dpreds[3]);
+	if ( both >= 1. )
+		return((dpreds[0] - dpreds[2]) / both);
+	else return(0);
+}
+
+double calc_dpreds_metric(double dpreds[6])
+{
+    double both;
+	both = (dpreds[1] + dpreds[3]);
+	if ( both >= 1. )
+		return((dpreds[1] - dpreds[3]) / both);
+	else return(0);
+}
+
+void update_dpreds(double dpreds[6],register double pred)
+{
+	if ( pred > SMALLVAL ) dpreds[0] += pred, dpreds[1] += 1.;
+	else if ( pred < -SMALLVAL ) dpreds[2] += pred, dpreds[3] += 1.;
+    if ( pred != 0. )
+    {
+        if ( dpreds[4] == 0. || pred < dpreds[4] )
+            dpreds[4] = pred;
+        if ( dpreds[5] == 0. || pred > dpreds[5] )
+            dpreds[5] = pred;
+    }
+    //printf("[%f %f %f %f] ",dpreds.x,dpreds.y,dpreds.z,dpreds.w);
+}
+
+#endif
