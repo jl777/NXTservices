@@ -21,21 +21,8 @@
 #ifndef punchclient
 #define punchclient
 
-#ifdef __linux__
-#include <getopt.h>
-#endif
-#include <arpa/inet.h>
-#include <assert.h>
-#include <netdb.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/time.h>
-#include <time.h>
-#include <unistd.h>
 
-#include "punch.h"
+//#include "punch.h"
 
 
 // Function: get_correspondent_address
@@ -56,9 +43,9 @@ static member_t *get_correspondent_address(char *request)
     printf("grp.(%s) port.(%s) %d name.(%s)\n",grp,portstr,port_nr,name);
     if ( strcmp(grp,Global_mp->groupname) == 0 && port_nr != 0 )
     {
+        ipbits = calc_ipbits(ipaddr);
         if ( (pm= member_find(name)) == NULL )
         {
-            ipbits = calc_ipbits(ipaddr);
             nxt64bits = _match_ipaddr_nxt64bits(ipbits,&port_nr);
             if ( nxt64bits != 0 )
             {
@@ -69,9 +56,14 @@ static member_t *get_correspondent_address(char *request)
         }
         if ( pm != 0 )
         {
+            pm->port = port_nr;
+            pm->ipbits = ipbits;
             pm->addr.sin_port = htons(port_nr);
             pm->addr.sin_family = AF_INET;
-            inet_aton(ipaddr,&pm->addr.sin_addr);
+            //inet_aton(ipaddr,&pm->addr.sin_addr);
+            *(uint32_t *)&pm->addr.sin_addr = ipbits;//inet_addr(ipaddr);
+            if ( strcmp(ipaddr,inet_ntoa(pm->addr.sin_addr)) != 0 )
+                printf("problem with sin_addr %s != %s\n",ipaddr,inet_ntoa(pm->addr.sin_addr));
             pm->have_address = 1;
             if ( pubkey[0] != 0 )
             {
@@ -79,7 +71,8 @@ static member_t *get_correspondent_address(char *request)
                 safecopy(pm->pubkeystr,pubkey,sizeof(pm->pubkeystr));
             }
             ++Global_mp->corresponding;
-            punch_add_ipaddr(pm->NXTaddr,ipaddr,port_nr);
+            punch_add_ipaddr(pm->NXTaddr,ipaddr,port_nr,(struct sockaddr *)&pm->addr);
+            copy_member_data(pm);
             // fprint(stdout, "fd.%d correspondent is %s/%s at %s/%d %s\n",pm->fd,name,grp,addr,port_nr,pubkey);
             return(pm);
         }
@@ -215,7 +208,10 @@ static void terminal_command(int server_tcp,char *cmd,char *servername,char *con
     else if ( strcmp(cmd,Global_mp->dispname) == 0 )
         fprint(stderr, "cannot punch a hole to yourself\n");
     else if ( (pm= member_find(cmd)) != NULL )
+    {
+        printf("got user request for punch\n");
         punch(pm,PUNCH_INITIATE,servername,connect_id);
+    }
     else print_help();
 }
 
@@ -252,7 +248,7 @@ static void terminal_io(int server_tcp,char *servername,char *connect_id)
     if ( (line[0] & 0xff) == 0xef )
         strcpy(line,prevline);
     else strcpy(prevline,line);
-    printf("line.(%s) %x\n",line,line[0]);
+    //printf("line.(%s) %x\n",line,line[0]);
     if ( n == 0 )
         timeout_connections();
     else if ( n == 1 && *line == '?' )
@@ -276,7 +272,7 @@ static void terminal_io(int server_tcp,char *servername,char *connect_id)
 // Fill an fdset for select() with the descriptors of all open socket and stdin.
 static int get_fdset(int server_sock,fd_set *fdset)
 {
-    int max = 0;
+    int max = -1;
     member_t *pm = member_list;
     FD_ZERO(fdset);
     if ( server_sock >= 0 )
@@ -288,8 +284,10 @@ static int get_fdset(int server_sock,fd_set *fdset)
     while ( pm != 0 )
     {
         if ( pm->fd >= 0 )
+        {
             FD_SET(pm->fd,fdset);
-        max = maxfd(max,pm->fd);
+            max = maxfd(max,pm->fd);
+        }
         pm = pm->next;
     }
     return(max);
@@ -300,15 +298,16 @@ static int get_fdset(int server_sock,fd_set *fdset)
 // correspondent clients and on stdin.  Every minute ping correspondents to keep connections alive.
 static int wait_for_input(int32_t server_tcp,char *servername,char *connect_id)
 {
-    int fastmicros = 1000;
+    int fastmicros = 100;
     static uint32_t counter;
     struct timeval timeout;
     fd_set fdset;
     int i,s,n,fd,maxfd = get_fdset(server_tcp,&fdset);
+    counter++;
     timeout.tv_sec  = Global_mp->corresponding ? 0 : PING_INTERVAL;
     timeout.tv_usec  = Global_mp->corresponding ? fastmicros : 0;
     if ( (s= select(maxfd+1,&fdset,NULL,NULL,&timeout)) < 0 )
-        perror("select");
+        return(0);//perror("select");
     for (fd=0,n=s; (n > 0)&&(fd < FD_SETSIZE); ++fd)
     {
        // process_syncmem_queue(server_tcp,servername,connect_id);
@@ -324,10 +323,13 @@ static int wait_for_input(int32_t server_tcp,char *servername,char *connect_id)
     for (i=0; i<1;i++)
         if ( process_syncmem_queue(server_tcp,servername,connect_id) <= 0 )
             break;
-    if ( s == 0 )
+    if ( s == 0  )
     {
-        if ( (Global_mp->corresponding == 0 && (counter % 10) == 0) || (Global_mp->corresponding != 0 && (counter % (1000000/fastmicros)*60) == 0) )
+        if ( (Global_mp->corresponding == 0 && (counter % 10) == 0) || (Global_mp->corresponding != 0 && (counter % ((1000000/fastmicros)*10)) == 0) )
+        {
+            //printf("ping_all ");
             ping_all(Global_mp->NXTADDR,servername,connect_id);
+        }
     }
     return(s);
 }
@@ -338,7 +340,7 @@ int set_intro(char *intro,int size,char *user,char *group,char *NXTaddr)
     char jsonstr[4096];
     gen_tokenjson(jsonstr,user,NXTaddr,time(NULL),0);
     //fprint(stdout, "Connecting as '%s' in group '%s' secret.(%s)\n", user, group,Global_mp->NXTACCTSECRET);
-    c = snprintf(intro, size, "%s/%s/%s %s", user, group, jsonstr, NXTaddr);
+    c = sprintf(intro, "%s/%s/%s %s", user, group, jsonstr, NXTaddr);
     assert(c < (int) size);
     if ( is_printable(intro) == 0 )
     {
@@ -395,6 +397,8 @@ void *run_NXTsync(void *_servername)
     char *servername = _servername;
     int server_tcp;
     char intro[INTRO_SIZE + 1],dispname[128],groupname[128],NXTaddr[128],connect_id[512];
+    //int32_t NXTsync_dispatch(void **ptrp,void *ignore);
+    //init_pingpong_queue(&NXTsync_received,"NXTsync_received",NXTsync_dispatch,0,0);
     printf("init_NXTsync %s %s %s\n",Global_mp->dispname,Global_mp->NXTADDR,Global_mp->groupname);
     strcpy(dispname,Global_mp->dispname);
     strcpy(groupname,Global_mp->groupname);
@@ -406,26 +410,36 @@ void *run_NXTsync(void *_servername)
     }
     if ( Global_mp->groupname[0] == 0 && groupname[0] != 0 )
         safecopy(Global_mp->groupname,groupname,sizeof(Global_mp->groupname));
-    if ( set_intro(intro,sizeof(intro),Global_mp->dispname,Global_mp->groupname,Global_mp->NXTADDR) < 0 )
+    while ( 1 )
     {
-        printf("init_NXTsync: invalid intro.(%s), try again\n",intro);
-        return(0);
+        if ( set_intro(intro,sizeof(intro),Global_mp->dispname,Global_mp->groupname,Global_mp->NXTADDR) < 0 )
+        {
+            printf("init_NXTsync: invalid intro.(%s), try again\n",intro);
+            sleep(30);
+            continue;
+        }
+        printf("got connect_id.%s intro.%s\n",connect_id,intro);
+        if ( (server_tcp= contact_punch_server(servername,connect_id,sizeof(connect_id),intro)) < 0 )
+        {
+            printf("init_NXTsync: error contacting (%s), try again\n",servername);
+            sleep(30);
+            continue;
+        }
+        strcpy(Global_mp->connect_id,connect_id);
+        strcpy(Global_mp->servername,servername);
+        Global_mp->server_tcp = server_tcp;
+        printf("Start NXTsync\n");
+        EXIT_FLAG = 0;
+        while ( EXIT_FLAG == 0 )
+        {
+            prompt(Global_mp->dispname,Global_mp->groupname);
+            if ( wait_for_input(server_tcp,servername,connect_id) < 0 )
+                break;
+        }
+        close(server_tcp), server_tcp = -1;
+        printf("NXTsync %s finished\n",servername);
+        sleep(10);
     }
-    printf("got connect_id.%s intro.%s\n",connect_id,intro);
-    if ( (server_tcp= contact_punch_server(servername,connect_id,sizeof(connect_id),intro)) < 0 )
-    {
-        printf("init_NXTsync: error contacting (%s), try again\n",servername);
-        return(0);
-    }
-    printf("Start NXTsync\n");
-    EXIT_FLAG = 0;
-    while ( EXIT_FLAG == 0 )
-    {
-        prompt(Global_mp->dispname,Global_mp->groupname);
-        if ( wait_for_input(server_tcp,servername,connect_id) < 0 )
-            break;
-    }
-    printf("NXTsync %s finished\n",servername);
     return(0);
 }
 
