@@ -21,7 +21,6 @@
 #ifndef punchutils
 #define punchutils
 
-
 static int prompt_again = 1;
 static int bell = 1;
 static int print_ping = 1;
@@ -105,12 +104,12 @@ stgstrip(char *s, const char *cset)
 char *
 print_host_address(const struct sockaddr_in *addr)
 {
-    static char buf[128];
+    static char buf[512];
     char *hostname = "unknown";
-    struct hostent *hp = gethostbyaddr(&addr->sin_addr,sizeof addr->sin_addr,AF_INET);
+    struct hostent *hp = gethostbyaddr((char *)&addr->sin_addr,sizeof addr->sin_addr,AF_INET);
     if ( hp != 0 )
         hostname = hp->h_name;
-    snprintf(buf, sizeof buf,"%s:%d (%s)",inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), hostname);
+    sprintf(buf,"%s:%d (%s)",inet_ntoa(addr->sin_addr), ntohs(addr->sin_port), hostname);
     return buf;
 }
 
@@ -122,14 +121,10 @@ print_host_address(const struct sockaddr_in *addr)
  Print the given internet address and port number to a string.  The address
  is printed in dotted format (eg "text 192.168.0.1:6008").
  */
-char *
-print_address(const struct sockaddr_in *addr)
+char *print_address(const struct sockaddr_in *addr)
 {
-    static char buf[128];
-    
-    snprintf(buf, sizeof buf,
-             "%s:%d",
-             inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
+    static char buf[512];
+    sprintf(buf,"%s:%d",inet_ntoa(addr->sin_addr), ntohs(addr->sin_port));
     return buf;
 }
 
