@@ -66,7 +66,7 @@ char *gen_handler_forms(char *NXTaddr,char *handler,char *disp,int (*forms_func)
             strcat(body,scripts[i]);
             free(scripts[i]);
         }
-    sprintf(str,"</script>\n\n<body><h3>%s</h3>\n",disp);
+    sprintf(str,"</script>\n\n<h3>%s</h3>\n",disp);
     strcat(body,str);
     for (i=0; i<n; i++)
         if ( forms[i] != 0 )
@@ -74,7 +74,7 @@ char *gen_handler_forms(char *NXTaddr,char *handler,char *disp,int (*forms_func)
             strcat(body,forms[i]);
             free(forms[i]);
         }
-    strcat(body,"<hr></body>\n");
+    strcat(body,"<hr>\n");
     if ( strlen(body) > sizeof(body) )
     {
         printf("yikes! make_form stack smashing???\n");
@@ -90,19 +90,29 @@ char *construct_varname(char **fields,int n,char *name,char *field,char *disp,in
     sprintf(buf,"document.%s.%s.value",name,field);
     return(clonestr(buf));
 }
-                  
+
 int gen_list_fields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
 {
     int n = 0;
-    char script[65536],vars[1024],*title,*type,*descr,*price;
+    char script[65536],vars[1024],*title,*category1,*category2,*category3,*tag1,*tag2,*tag3,*descr,*price,*subatomic,*URI,*duration;
     title = construct_varname(fields,n++,name,"title","Item Title:",0,0);
-    type = construct_varname(fields,n++,name,"type","Item Type:",0,0);
+    category1 = construct_varname(fields,n++,name,"category1","category1:",0,0);
+    category2 = construct_varname(fields,n++,name,"category2","category2:",0,0);
+    category3 = construct_varname(fields,n++,name,"category3","category3:",0,0);
+    tag1 = construct_varname(fields,n++,name,"tag1","tag1:",0,0);
+    tag2 = construct_varname(fields,n++,name,"tag2","tag2:",0,0);
+    tag3 = construct_varname(fields,n++,name,"tag3","tag3:",0,0);
     descr = construct_varname(fields,n++,name,"description","Item Description:",60,5);
+    URI = construct_varname(fields,n++,name,"URI","URI:",60,0);
     price = construct_varname(fields,n++,name,"price","Item Price (in NXT):",0,0);
-    sprintf(vars,"\"title\":\"' + %s +'\",\"type\":\"' + %s + '\",\"description\":\"' + %s + '\",\"price\":\"' + %s'\"",title,type,descr,price);
-    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",\"listing\":{%s}}';\n}\n",name,handler,name,NXTaddr,vars);
+    subatomic = construct_varname(fields,n++,name,"NXTsubatomic","{NXTsubatomic}:",60,0);
+    duration = construct_varname(fields,n++,name,"duration","duration (hours):",0,0);
+    sprintf(script,"function click_%s()\n{\nvar A = %s; B = %s; C = %s; D = %s; E = %s; F = %s; G = %s; H = %s; I = %s; J = %s; K = %s; L = %s;\n",name,title,category1,category2,category3,tag1,tag2,tag3,descr,URI,price,subatomic,duration);
+    sprintf(vars,"\"title\":\"' + A + '\",\"category1\":\"' + B + '\",\"category2\":\"' + C + '\",\"category3\":\"' + D + '\",\"tag1\":\"' + E + '\",\"tag2\":\"' + F + '\",\"tag3\":\"' + G + '\",\"description\":\"' + H + '\",\"URI\":\"' + I + '\",\"price\":\"' + J + '\",\"subatomic\":\"' + K + '\",\"duration\":\"' + L + '\"");
+    sprintf(script+strlen(script),"location.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",%s}';\n}\n",handler,name,NXTaddr,vars);
     *scriptp = clonestr(script);
-    free(title); free(type); free(descr); free(price);
+    free(title); free(category1); free(category2); free(category3); free(tag1); free(tag2); free(tag3);
+    free(descr); free(URI); free(price); free(subatomic); free(duration);
     return(n);
 }
 
@@ -116,7 +126,7 @@ int gen_listings_fields(char *NXTaddr,char *handler,char *name,char **fields,cha
     type = construct_varname(fields,n++,name,"type","Only Type:",0,0);
     minprice = construct_varname(fields,n++,name,"minprice","Min Price (in NXT):",0,0);
     maxprice = construct_varname(fields,n++,name,"maxprice","Max Price (in NXT):",0,0);
-    sprintf(vars,"\"seller\":\"' + %s +'\",\"buyer\":\"' + %s +'\",\"title\":\"' + %s +'\",\"type\":\"' + %s + '\",\"minprice\":\"' + %s + '\",\"maxprice\":\"' + %s'\"",seller,buyer,title,type,minprice,maxprice);
+    sprintf(vars,"\"seller\":\"' + %s + '\",\"buyer\":\"' + %s + '\",\"title\":\"' + %s + '\",\"type\":\"' + %s + '\",\"minprice\":\"' + %s + '\",\"maxprice\":\"' + %s + '\"",seller,buyer,title,type,minprice,maxprice);
     sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",\"filters\":{%s}}';\n}\n",name,handler,name,NXTaddr,vars);
     *scriptp = clonestr(script);
     free(seller); free(buyer); free(title); free(type); free(minprice); free(maxprice);
@@ -128,7 +138,7 @@ int gen_changeurl_fields(char *NXTaddr,char *handler,char *name,char **fields,ch
     int n = 0;
     char script[65536],vars[1024],*url;
     url = construct_varname(fields,n++,name,"changeurl","Change location of NXTprotocol.html",0,0);
-    sprintf(vars,"\"URL\":\"' + %s'\"",url);
+    sprintf(vars,"\"URL\":\"' + %s + '\"",url);
     sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",%s}';\n}\n",name,handler,name,vars);
     *scriptp = clonestr(script);
     free(url);
@@ -140,7 +150,7 @@ int gen_listingid_field(char *NXTaddr,char *handler,char *name,char **fields,cha
     int n = 0;
     char script[65536],vars[1024],*listingid;
     listingid = construct_varname(fields,n++,name,"listingid","Listing ID:",0,0);
-    sprintf(vars,"\"listingid\":\"' + %s'\"",listingid);
+    sprintf(vars,"\"listingid\":\"' + %s + '\"",listingid);
     sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",%s}';\n}\n",name,handler,name,NXTaddr,vars);
     *scriptp = clonestr(script);
     free(listingid);
@@ -153,7 +163,7 @@ int gen_acceptoffer_fields(char *NXTaddr,char *handler,char *name,char **fields,
     char script[65536],vars[1024],*listingid,*buyer;
     listingid = construct_varname(fields,n++,name,"listingid","Listing ID:",0,0);
     buyer = construct_varname(fields,n++,name,"buyer","NXT address:",0,0);
-    sprintf(vars,"\"listingid\":\"' + %s +'\",\"buyer\":\"' + %s'\"",listingid,buyer);
+    sprintf(vars,"\"listingid\":\"' + %s + '\",\"buyer\":\"' + %s + '\"",listingid,buyer);
     sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",%s}';\n}\n",name,handler,name,NXTaddr,vars);
     *scriptp = clonestr(script);
     free(listingid); free(buyer);
@@ -163,13 +173,14 @@ int gen_acceptoffer_fields(char *NXTaddr,char *handler,char *name,char **fields,
 int gen_makeoffer_fields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
 {
     int n = 0;
-    char script[65536],vars[1024],*listingid,*bid;
+    char script[65536],vars[1024],*listingid,*bid,*comments;
     listingid = construct_varname(fields,n++,name,"listingid","Listing ID:",0,0);
-    bid = construct_varname(fields,n++,name,"bid","comments:",30,5);
-    sprintf(vars,"\"listingid\":\"' + %s +'\",\"bid\":\"' + %s'\"",listingid,bid);
+    bid = construct_varname(fields,n++,name,"bid","amount or {NXTsubatomic}",80,0);
+    comments = construct_varname(fields,n++,name,"comments","comments:",30,5);
+    sprintf(vars,"\"listingid\":\"' + %s + '\",\"bid\":\"' + %s + '\",\"comments\":\"' + %s + '\"",listingid,bid,comments);
     sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",%s}';\n}\n",name,handler,name,NXTaddr,vars);
     *scriptp = clonestr(script);
-    free(listingid); free(bid);
+    free(listingid); free(bid); free(comments);
     return(n);
 }
 
@@ -181,7 +192,7 @@ int gen_feedback_fields(char *NXTaddr,char *handler,char *name,char **fields,cha
     rating = construct_varname(fields,n++,name,"rating","Rating:",0,0);
     aboutbuyer = construct_varname(fields,n++,name,"aboutbuyer","Feedback about buyer:",30,5);
     aboutseller = construct_varname(fields,n++,name,"aboutseller","Feedback about seller:",30,5);
-    sprintf(vars,"\"listingid\":\"' + %s +'\",\"rating\":\"' + %s +'\",\"aboutbuyer\":\"' + %s +'\",\"aboutseller\":\"' + %s'\"",listingid,rating,aboutbuyer,aboutseller);
+    sprintf(vars,"\"listingid\":\"' + %s + '\",\"rating\":\"' + %s +'\",\"aboutbuyer\":\"' + %s + '\",\"aboutseller\":\"' + %s + '\"",listingid,rating,aboutbuyer,aboutseller);
     sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",%s}';\n}\n",name,handler,name,NXTaddr,vars);
     *scriptp = clonestr(script);
     free(listingid); free(rating); free(aboutbuyer); free(aboutseller);
@@ -237,7 +248,7 @@ int gen_register_fields(char *NXTaddr,char *handler,char *name,char **fields,cha
     doge = construct_varname(fields,n++,name,"doge",gen_coinacct_line(buf,DOGE_COINID,nxt64bits,NXTaddr),60,1);
     drk = construct_varname(fields,n++,name,"drk",gen_coinacct_line(buf,DRK_COINID,nxt64bits,NXTaddr),60,1);
     cgb = construct_varname(fields,n++,name,"cgb",gen_coinacct_line(buf,CGB_COINID,nxt64bits,NXTaddr),60,1);
-    sprintf(vars,"\"BTC\":\"' + %s +'\",\"LTC\":\"' + %s + '\",\"DOGE\":\"' + %s + '\",\"DRK\":\"' + %s + '\",\"CGB\":\"' + %s'\"",btc,ltc,doge,drk,cgb);
+    sprintf(vars,"\"BTC\":\"' + %s + '\",\"LTC\":\"' + %s + '\",\"DOGE\":\"' + %s + '\",\"DRK\":\"' + %s + '\",\"CGB\":\"' + %s + '\"",btc,ltc,doge,drk,cgb);
     //printf("vars.(%s)\n",vars);
     sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",\"coins\":{%s}}';\n}\n",name,handler,name,NXTaddr,vars);
     *scriptp = clonestr(script);
@@ -251,7 +262,7 @@ int gen_dispNXTacct_fields(char *NXTaddr,char *handler,char *name,char **fields,
     char script[65536],vars[1024],*coin,*assetid;
     coin = construct_varname(fields,n++,name,"coin","Specify coin:",0,0);
     assetid = construct_varname(fields,n++,name,"assetid","Specify assetid:",0,0);
-    sprintf(vars,"\"coin\":\"' + %s +'\",\"assetid\":\"' + %s'\"",coin,assetid);
+    sprintf(vars,"\"coin\":\"' + %s + '\",\"assetid\":\"' + %s + '\"",coin,assetid);
     sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",%s}';\n}\n",name,handler,name,NXTaddr,vars);
     *scriptp = clonestr(script);
     free(coin); free(assetid);
@@ -264,7 +275,7 @@ int gen_dispcoininfo_fields(char *NXTaddr,char *handler,char *name,char **fields
     char script[65536],vars[1024],*coin,*nxtacct;
     coin = construct_varname(fields,n++,name,"coin","Specify coin:",0,0);
     nxtacct = construct_varname(fields,n++,name,"nxtacct","Specify NXTaddr (blank for all):",0,0);
-    sprintf(vars,"\"coin\":\"' + %s +'\",\"assetid\":\"' + %s'\"",coin,nxtacct);
+    sprintf(vars,"\"coin\":\"' + %s + '\",\"assetid\":\"' + %s + '\"",coin,nxtacct);
     sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",%s}';\n}\n",name,handler,name,NXTaddr,vars);
     *scriptp = clonestr(script);
     free(coin); free(nxtacct);
@@ -279,8 +290,8 @@ int gen_redeem_fields(char *NXTaddr,char *handler,char *name,char **fields,char 
     amount = construct_varname(fields,n++,name,"amount","Specify withdrawal amount:",0,0);
     destaddr = construct_varname(fields,n++,name,"destaddr","Specify destination address (blank to use registered):",60,1);
     InstantDEX = construct_varname(fields,n++,name,"InstantDEX","Specify amount for InstantDEX:",0,0);
-    sprintf(vars,"\"redeem\":\"' + %s +'\",\"withdrawaddr\":\"' + %s +'\",\"InstantDEX\":\"' + %s'\"",coin,destaddr,InstantDEX);
-    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",\"coin\":\"' + %s +'\",\"amount\":\"' + %s +'\",\"comment\":{%s}}';\n}\n",name,handler,name,NXTaddr,coin,amount,vars);
+    sprintf(vars,"\"redeem\":\"' + %s + '\",\"withdrawaddr\":\"' + %s + '\",\"InstantDEX\":\"' + %s + '\"",coin,destaddr,InstantDEX);
+    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\",\"coin\":\"' + %s + '\",\"amount\":\"' + %s + '\",\"comment\":{%s}}';\n}\n",name,handler,name,NXTaddr,coin,amount,vars);
     *scriptp = clonestr(script);
     free(coin); free(amount); free(destaddr); free(InstantDEX);
     return(n);
@@ -332,12 +343,12 @@ int gen_subatomic_tradefields(char *NXTaddr,char *handler,char *name,char **fiel
     //senderip = construct_varname(fields,n++,name,"senderip","your IP address:",0,0);
 
     coin = construct_varname(fields,n++,name,"coin","source coin or NXT for atomic swap:",0,0);
-    amount = construct_varname(fields,n++,name,"amount","source amount:",0,0);
-    coinaddr = construct_varname(fields,n++,name,"coinaddr","source coinaddress or signed txbytes:",60,5);
+    amount = construct_varname(fields,n++,name,"amount","source amount or mysignaturehash:",64,1);
+    coinaddr = construct_varname(fields,n++,name,"coinaddr","source coinaddress or unsigned txbytes:",64,5);
 
     destcoin = construct_varname(fields,n++,name,"destcoin","dest coin or NXT for atomic swap:",0,0);
-    destamount = construct_varname(fields,n++,name,"destamount","dest amount:",0,0);
-    destcoinaddr = construct_varname(fields,n++,name,"destcoinaddr","dest coinaddress or unsigned txbytes:",60,5);
+    destamount = construct_varname(fields,n++,name,"destamount","dest amount or othersighash:",64,1);
+    destcoinaddr = construct_varname(fields,n++,name,"destcoinaddr","dest coinaddress or unsigned txbytes:",64,5);
 
     destNXT = construct_varname(fields,n++,name,"destNXT","NXT address you are trading with:",0,0);
     sprintf(script,"function click_%s()\n{\nvar A = %s; B = %s; C = %s; D = %s; E = %s; F = %s; G = %s;\n",name,coin,amount,coinaddr,destNXT,destcoin,destamount,destcoinaddr);
@@ -395,8 +406,6 @@ char *teststr = "<!DOCTYPE html>\
 <section class=\"browser\">NXTprotocol detected Browser: <div id=brow>...</div></section><BR><BR>\
 <section id=\"increment\" class=\"group2\">\
 <table>\
-<input type=button id=offset value=\"status\" onclick=\"click_subatomic_status();\" >\
-<input type=button id=offset value=\"cancel\" onclick=\"click_subatomic_cancel();\" >\
 <BR><BR>\
 <div id=number> </div>\
 <td>Your websocket connection status:</td>\
@@ -405,66 +414,71 @@ char *teststr = "<!DOCTYPE html>\
 </table>\
 </td></tr></table>\
 </section>\
-</article>\
-<script>\
-var pos = 0;\
-function get_appropriate_ws_url()\
-{\
-    var pcol;\
-    var u = document.URL;\
-    if (u.substring(0, 5) == \"https\") {\
-        pcol = \"wss://\";\
-        u = u.substr(8);\
+</article>";
+
+char *endstr = "<script>\n\
+var pos = 0;\n\
+function get_appropriate_ws_url()\n\
+{\n\
+    var pcol;\n\
+    var u = document.URL;\n\
+    if (u.substring(0, 5) == \"https\") {\n\
+        pcol = \"wss://\";\n\
+        u = u.substr(8);\n\
     } else {\
-        pcol = \"ws://\";\
-        if (u.substring(0, 4) == \"http\")\
-            u = u.substr(7);\
+        pcol = \"ws://\";\n\
+        if (u.substring(0, 4) == \"http\")\n\
+            u = u.substr(7);\n\
     }\
-    u = u.split('/');\
-    return pcol + u[0] + \"/xxx\";\
-}\
-\
+    u = u.split('/');\n\
+    return pcol + u[0] + \"/xxx\";\n\
+}\n\
+\n\
 document.getElementById(\"number\").textContent = get_appropriate_ws_url();\
-var socket_di;\
-if (typeof MozWebSocket != \"undefined\") {\
-    socket_di = new MozWebSocket(get_appropriate_ws_url(),\
-                                 \"dumb-increment-protocol\");\
-} else {\
-    socket_di = new WebSocket(get_appropriate_ws_url(),\
-                              \"dumb-increment-protocol\");\
-}\
-try {\
-    socket_di.onopen = function() {\
-        document.getElementById(\"wsdi_statustd\").style.backgroundColor = \"#40ff40\";\
-        document.getElementById(\"wsdi_status\").textContent = \"OPEN\";\
-    }\
-    socket_di.onmessage =function got_packet(msg) {\
-        document.getElementById(\"number\").textContent = msg.data + \"\n\";\
-    }\
-    socket_di.onclose = function(){\
-        document.getElementById(\"wsdi_statustd\").style.backgroundColor = \"#ff4040\";\
-        document.getElementById(\"wsdi_status\").textContent = \"CLOSED\";\
-    }\
-    } catch(exception) {\
-        alert('<p>Error' + exception);\
-    }\
-    </script>\
-    </head>";
-    
+var socket_di;\n\
+if (typeof MozWebSocket != \"undefined\") {\n\
+    socket_di = new MozWebSocket(get_appropriate_ws_url(),\n\
+                                 \"dumb-increment-protocol\");\n\
+} else {\n\
+    socket_di = new WebSocket(get_appropriate_ws_url(),\n\
+                              \"dumb-increment-protocol\");\n\
+}\n\
+try {\n\
+    socket_di.onopen = function() {\n\
+        document.getElementById(\"wsdi_statustd\").style.backgroundColor = \"#40ff40\";\n\
+        document.getElementById(\"wsdi_status\").textContent = \"OPEN\";\n\
+    }\n\
+    socket_di.onmessage =function got_packet(msg) {\n\
+        document.getElementById(\"number\").textContent = msg.data + \"\\n\";\n\
+    }\n\
+    socket_di.onclose = function(){\n\
+        document.getElementById(\"wsdi_statustd\").style.backgroundColor = \"#ff4040\";\n\
+        document.getElementById(\"wsdi_status\").textContent = \"CLOSED\";\n\
+    }\n\
+    } catch(exception) {\n\
+        alert('<p>Error' + exception);\n\
+    }\n\
+    </script>\n\
+    </html>";
+
+
 void gen_testforms()
 {
     char *str;
     sprintf(testforms,"%s<br/><b>%s<br/> %s<br/>NXT.%s balance %.8f %s</b><br/>\n",teststr,Global_mp->dispname,PC_USERNAME[0]!=0?PC_USERNAME:"setAccountInfo on http://127.0.0.1:6876/test description={\"username\":\"your pc username\"}",Global_mp->NXTADDR,dstr(Global_mp->acctbalance),Global_mp->acctbalance == 0?"<- need to send NXT":"");
-    str = gen_handler_forms(Global_mp->NXTADDR,"subatomic","subatomic API test forms",subatomic_forms);
-    strcat(testforms,str);
-    free(str);
+
     str = gen_handler_forms(Global_mp->NXTADDR,"NXTorrent","NXTorrent API test forms",NXTorrent_forms);
     strcat(testforms,str);
     free(str);
+
+    str = gen_handler_forms(Global_mp->NXTADDR,"subatomic","subatomic API test forms",subatomic_forms);
+    strcat(testforms,str);
+    free(str);
+  
     str = gen_handler_forms(Global_mp->NXTADDR,"multigateway","multigateway API test forms",multigateway_forms);
     strcat(testforms,str);
     free(str);
-    strcat(testforms,"</html>\n");
+    strcat(testforms,endstr);
     
 }
 #endif
