@@ -19,17 +19,7 @@
  wrm at basyl.co.uk
  */
 
-#include <arpa/inet.h>
-#include <ctype.h>
-#include <signal.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <sys/time.h>
-#include <sys/wait.h>
-#include <time.h>
-#include <unistd.h>
+
 
 //#include "punch.h"
 //extern unsigned short rvz_port;// = RVZ_PORT;
@@ -97,7 +87,7 @@ static int make_tcp_socket(int port)
 static size_t print_member(char *buf, size_t size, client_t *pc, int sign)
 {
     char ipaddr[32];
-    int len = snprintf(buf, size, "%c%s %s [%s] %s/%d %s\n",sign,pc->user,pc->NXTaddr,pc->status,get_client_ipaddr(ipaddr,pc),get_client_port(pc),pc->pubkeystr);
+    int len = sprintf(buf, "%c%s %s [%s] %s/%d %s\n",sign,pc->user,pc->NXTaddr,pc->status,get_client_ipaddr(ipaddr,pc),get_client_port(pc),pc->pubkeystr);
     if ( len >= (int)size )
         printf("print_member: len.%d vs size.%ld\n",len,size);
     assert(len < (int) size);
@@ -213,9 +203,9 @@ static int intro(client_t *pc,char *buf)
                 decode_hex(pc->pubkey,sizeof(pc->pubkey),pubkey);
                 {
                     char tmp[512];
-                    init_hexbytes(tmp,pc->pubkey,sizeof(pc->pubkey));
+                    init_hexbytes_noT(tmp,pc->pubkey,sizeof(pc->pubkey));
                     if ( strcmp(tmp,pubkey) != 0 )
-                    printf("error codec'ing pubkey %s vs %s\n",tmp,pubkey);
+                        printf("error codec'ing pubkey %s vs %s\n",tmp,pubkey);
                 }
             }
             strcpy(pc->user, user);
@@ -252,11 +242,11 @@ static void servpunch(client_t *pc,client_t *target, struct sockaddr_in *addr, c
         if ( mypubkey[0] != 0 )
             safecopy(pc->pubkeystr,mypubkey,sizeof(pc->pubkeystr));
        // printf(">>>>>>>>> %s pubkey.%s\n",pc->user,pc->pubkeystr);
-        n = snprintf(buf, sizeof buf, "%c%s/%s %s:%d %s",ch,pc->user,pc->group->name,inet_ntoa(addr->sin_addr),ntohs(addr->sin_port),pc->pubkeystr);
-        punch_add_ipaddr(pc->NXTaddr,inet_ntoa(addr->sin_addr),ntohs(addr->sin_port));
+        n = sprintf(buf, "%c%s/%s %s:%d %s",ch,pc->user,pc->group->name,inet_ntoa(addr->sin_addr),ntohs(addr->sin_port),pc->pubkeystr);
+        punch_add_ipaddr(pc->NXTaddr,inet_ntoa(addr->sin_addr),ntohs(addr->sin_port),(struct sockaddr *)addr);
     }
     else if ( deny != 0 )
-        n = snprintf(buf, sizeof buf, "!%s/%s",pc->user,pc->group->name);
+        n = sprintf(buf, "!%s/%s",pc->user,pc->group->name);
     else return;                 // ignore unrecognized request 
     assert(n < (int) sizeof buf);
     //printf("send target.(%s)\n",buf);
@@ -284,19 +274,18 @@ static void receive_udp_punch(int sock)
     {
         char *s = buf;
         Global_mp->isudpserver = 1;
-        printf("UDP_PUNCH.(%s)\n",buf);
         char *id = stgsep(&s, " ");
         char *user = stgsep(&s, "/");
         char *group = stgsep(&s, " ");
         char *pubkey = stgsep(&s, " ");
         char *tag = stgsep(&s, "\n\r");
-        //printf("pubkey.(%s) tag.(%s)\n",pubkey,tag);
         group_t *pg = group_find(group);
         client_t *pc = client_find_by_id(id);
         client_t *target = client_find_by_name(user, pg);
+        printf("UDP_PUNCH.(%s) (%s) (%s) (%s) tag.(%s) %p %p %p\n",user,id,group,pubkey,tag,pg,pc,target);
         if ( pc == 0 )
         {
-            close(sock);
+            //close(sock);
             slog(": Unrecognized UDP client at %s (ID %s)\n",print_host_address(&addr), id);
         }
         else if ( pg != 0 && pc->group != 0 && target != 0 && target->user[0] != 0 )
@@ -343,7 +332,7 @@ static int receive_tcp_connection(int sock)
         {
             printf("fd.%d add NXT.%s ipaddr.(%s %d) id.(%s)\n",fd,pc->NXTaddr,inet_ntoa(addr.sin_addr),ntohs(addr.sin_port),pc->id);
             Global_mp->istcpserver = 1;
-            punch_add_ipaddr(pc->NXTaddr,inet_ntoa(addr.sin_addr),ntohs(addr.sin_port));
+            punch_add_ipaddr(pc->NXTaddr,inet_ntoa(addr.sin_addr),ntohs(addr.sin_port),(struct sockaddr *)&addr);
         }
     }
     return(fd);
@@ -433,7 +422,7 @@ static long receive_tcp_traffic(int sock)
 
 // Function: get_fdset
 // Fill an fdset for select() with the descriptors of all open sockets.
-static int servget_fdset(int server_tcp,int server_udp,fd_set *fdset)
+static int servget_fdset(int server_tcp,int server_udp,int udp_echo,fd_set *fdset)
 {
     int max = 0;
     client_t *pc = client_list;
@@ -442,7 +431,10 @@ static int servget_fdset(int server_tcp,int server_udp,fd_set *fdset)
         FD_SET(server_tcp,fdset);
     if ( server_udp >= 0 )
         FD_SET(server_udp,fdset);
+    if ( udp_echo >= 0 )
+        FD_SET(udp_echo,fdset);
     max = maxfd(server_tcp,server_udp);
+    max = maxfd(max,udp_echo);
     while ( pc != 0 )
     {
         if ( pc->sock >= 0 )
@@ -455,11 +447,11 @@ static int servget_fdset(int server_tcp,int server_udp,fd_set *fdset)
 
 // Function: serve
 // The main server function in which TCP and UDP ports are monitored and connections/traffic dispatched to handlers.
-static int serve(int tcp,int udp)
+static int serve(int tcp,int udp,int udp_echo)
 {
     struct timeval timeout;
     fd_set fdset;
-    int fd,s,maxfd = servget_fdset(tcp,udp,&fdset);
+    int fd,s,maxfd = servget_fdset(tcp,udp,udp_echo,&fdset);
     timeout.tv_sec  = 10;//Global_mp->corresponding ? PING_INTERVAL : 60;
     timeout.tv_usec = 0;
     if ( (s= select(maxfd+1,&fdset,NULL,NULL,&timeout)) < 0 )
@@ -473,6 +465,8 @@ static int serve(int tcp,int udp)
             receive_tcp_connection(tcp);
         else if ( fd == udp )
             receive_udp_punch(udp);
+        //else if ( fd == udp_echo )
+         //   receive_udp_echo(udp_echo,0);
         else if ( receive_tcp_traffic(fd) < 0 )
         {
             printf("closing connection %d\n",fd);
@@ -480,7 +474,10 @@ static int serve(int tcp,int udp)
         }
     }
     if ( s == 0 )
+    {
+       // receive_udp_echo(udp_echo,1);
         ping_all(Global_mp->NXTADDR,0,0);
+    }
   //printf("serve returns s.%d\n",s);
     return(s);
 }
@@ -490,9 +487,10 @@ static int serve(int tcp,int udp)
 static void run_server(unsigned short port)
 {
     int udp = make_udp_socket(port);
+    int udp_echo = make_udp_socket(NXTSYNC_PORT);
     int tcp = make_tcp_socket(port);
     if ( udp >= 0 && tcp >= 0 )
-        while ( serve(tcp, udp) >= 0 )
+        while ( serve(tcp, udp, udp_echo) >= 0 )
             ;
     printf("finished run_server\n");
 }
