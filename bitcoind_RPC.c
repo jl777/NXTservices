@@ -8,14 +8,13 @@
 #ifndef JL777_BITCOIND_RPC
 #define JL777_BITCOIND_RPC
 
-#include <stdlib.h>
-#include <unistd.h>
-#include <memory.h>
-#include <pthread.h>
-#include <sys/time.h>
-#include <curl/curl.h>
-#include <curl/easy.h>
-#include <stdint.h>
+//#include <stdint.h>
+//#include <stdlib.h>
+//#include <unistd.h>
+//#include <memory.h>
+//#include <pthread.h>
+//#include <sys/time.h>
+
 
 #define NUM_BITCOIND_RETRIES 3  // bitcoind spews lots of errors, without retries and long enough delay, crashes
 #define MAGIC_BITCOINC_RPCDELAY 13  // smaller numbers cause mysterious crash, probably in libcurl??
@@ -62,20 +61,9 @@ char *post_process_bitcoind_RPC(char *debugstr,char *command,char *params,char *
 }
 #endif
 
-struct upload_buffer { const void *buf; size_t len; };
+struct upload_buffer { const unsigned char *buf; size_t len; };
 struct MemoryStruct { char *memory; size_t size; };
 
-double milliseconds(void)
-{
-    static struct timeval timeval,first_timeval;
-    gettimeofday(&timeval,0);
-    if ( first_timeval.tv_sec == 0 )
-    {
-        first_timeval = timeval;
-        return(0);
-    }
-    return((timeval.tv_sec - first_timeval.tv_sec) * 1000. + (timeval.tv_usec - first_timeval.tv_usec)/1000.);
-}
 
 static size_t WriteMemoryCallback(void *ptr,size_t size,size_t nmemb,void *data)
 {
@@ -119,6 +107,7 @@ char *bitcoind_RPC(char *debugstr,int32_t numretries,char *url,char *userpass,ch
     struct curl_slist *headers = NULL;
     struct upload_buffer upload_data;
     struct MemoryStruct chunk;
+    double milliseconds();
     //static pthread_mutex_t mutex;
     //pthread_mutex_lock(&mutex);
     if ( didinit == 0 )
@@ -128,9 +117,9 @@ char *bitcoind_RPC(char *debugstr,int32_t numretries,char *url,char *userpass,ch
     }
     //printf("start bitcoind_RPC %s\n",command!=0?command:"");
     starttime = milliseconds();
-    if ( 0 && command != 0 && laststart+1 > starttime ) // hack for bitcoind "Couldn't connect to server"
+    if ( 1 && laststart+1 > starttime ) // horrible hack for bitcoind "Couldn't connect to server"
     {
-        usleep(1000);
+        usleep(2000);
         starttime = milliseconds();
     }
     laststart = starttime;
@@ -162,7 +151,7 @@ retry:
         databuf = malloc(4096 + strlen(command) + strlen(params));
         sprintf(databuf,"{\"id\":\"jl777\",\"method\":\"%s\",\"params\":%s%s%s}",command,bracket0,params,bracket1);
        // printf(">>>>(%s)<<<<< args.(%s)\n",databuf,params);
-        upload_data.buf = databuf;
+        upload_data.buf = (unsigned char *)databuf;
         upload_data.len = strlen(databuf);
         sprintf(len_hdr, "Content-Length: %lu",(unsigned long)upload_data.len);
         headers = curl_slist_append(NULL,"Expect:");
@@ -178,7 +167,9 @@ retry:
     if ( res != CURLE_OK )
     {
         fprintf(stderr, "curl_easy_perform() failed: %s %s.(%s %s %s %s)\n",curl_easy_strerror(res),debugstr,url,userpass,command,params);
-        sleep(delay);
+        if ( command != 0 && params != 0 )
+            sleep(delay);
+        else sleep(1);
         //delay *= 3;
         if ( numretries-- > 0 )
         {
@@ -202,7 +193,7 @@ retry:
     count++;
     elapsedsum2 += (milliseconds() - starttime);
 #ifndef __APPLE__
-    if ( elapsedsum2/count > 100 || (milliseconds() - starttime) > 1000 )
+    if ( elapsedsum2/count > 1000 && (milliseconds() - starttime) > 1000 )
         fprintf(stderr,"%d: %9.6f %9.6f | elapsed %.3f millis | bitcoind_RPC.(%s)\n",count,elapsedsum/count,elapsedsum2/count,(milliseconds() - starttime),url);
 #endif
    // pthread_mutex_unlock(&mutex);
