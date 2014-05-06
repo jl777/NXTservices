@@ -145,7 +145,7 @@ struct hashtable *hashtable_create(char *name,int64_t hashsize,long structsize,l
     hp->keyoffset = keyoffset;
     hp->keysize = keysize;
     hp->modifiedoffset = modifiedoffset;
-    hp->hashtable = calloc(hp->hashsize,sizeof(*hp->hashtable));
+    hp->hashtable = calloc((long)hp->hashsize,sizeof(*hp->hashtable));
     return(hp);
 }
 
@@ -177,7 +177,7 @@ void **hashtable_gather_modified(int64_t *changedp,struct hashtable *hp,int32_t 
     }
     if ( n != 0 )
     {
-        list = calloc(n+1,sizeof(*list));
+        list = calloc((long)n+1,sizeof(*list));
         for (i=m=0; i<hp->hashsize; i++)
         {
             ptr = hp->hashtable[i];
@@ -226,7 +226,7 @@ struct hashtable *resize_hashtable(struct hashtable *hp,int64_t newsize)
     printf("about to resize %s %ld, hp.%p\n",hp->name,(long)hp->numitems,hp);
     newhp->hashsize = newsize;
     newhp->numitems = 0;
-    newhp->hashtable = calloc(newhp->hashsize,sizeof(*newhp->hashtable));
+    newhp->hashtable = calloc((long)newhp->hashsize,sizeof(*newhp->hashtable));
     for (ind=0; ind<hp->hashsize; ind++)
     {
         ptr = hp->hashtable[ind];
@@ -272,12 +272,13 @@ void *add_hashtable(int32_t *createdflagp,struct hashtable **hp_ptr,char *key)
     if ( key == 0 || *key == 0 || hp == 0 || strlen(key) >= hp->keysize )
     {
         printf("%p key.(%s) len.%ld is too big for %s %ld, FATAL\n",key,key,strlen(key),hp->name,hp->keysize);
-        while ( 1 ) sleep(1);
-        return(0);
+        //while ( 1 ) sleep(1);
+        //return(0);
+        key = "123456";
     }
     //printf("hp %p %p hashsize.%ld add_hashtable(%s)\n",hp_ptr,hp,(long)hp->hashsize,key);
     if ( hp->hashtable == 0 )
-        hp->hashtable = calloc(sizeof(*hp->hashtable),hp->hashsize);
+        hp->hashtable = calloc(sizeof(*hp->hashtable),(long)hp->hashsize);
     else if ( hp->numitems > hp->hashsize*HASHTABLE_FULL )
     {
         *hp_ptr = resize_hashtable(hp,hp->hashsize * HASHTABLE_RESIZEFACTOR);
