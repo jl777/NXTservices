@@ -45,7 +45,7 @@
 #endif
 
 #ifdef __APPLE__
-//#include "libuv/uv.h"
+#include "libuv/uv.h"
 #else
 #include "../libuv/include/uv.h"
 #endif
