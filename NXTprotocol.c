@@ -248,22 +248,6 @@ char *NXTprotocol_json_handler(struct NXT_protocol *p,char *jsonstr)
     return(retjsontxt);
 }
 
-cJSON *parse_json_AM(struct json_AM *ap)
-{
-    char *jsontxt;
-    if ( ap->jsonflag != 0 )
-    {
-        jsontxt = (ap->jsonflag == 1) ? ap->jsonstr : decode_json(&ap->jsn,ap->jsonflag);
-        if ( jsontxt != 0 )
-        {
-            if ( jsontxt[0] == '"' && jsontxt[strlen(jsontxt)-1] == '"' )
-                replace_backslashquotes(jsontxt);
-            return(cJSON_Parse(jsontxt));
-        }
-    }
-    return(0);
-}
-
 int32_t process_NXT_event(struct NXThandler_info *mp,int32_t histmode,char *txid,int64_t type,int64_t subtype,struct NXT_AMhdr *AMhdr,char *sender,char *receiver,char *assetid,int64_t assetoshis,char *comment,cJSON *json)
 {
     int32_t i,count,highest_priority;
@@ -590,7 +574,8 @@ void *NXTloop(void *ptr)
             mp->timestamp = process_NXTblock(&height,nextblock,mp,histmode,mp->blockidstr);
             if ( height > mp->NXTheight )
                 mp->NXTheight = height;
-            printf("NXT.%d %s timestamp.%d lag.%d NEW block.(%s) vs lastblock.(%s) -> (%s)\n",height,histmode?"HIST":"",mp->timestamp,issue_getTime()-mp->timestamp,mp->blockidstr,mp->lastblock,nextblock);
+            if ( histmode == 0 )
+                printf("NXT.%d %s timestamp.%d lag.%d NEW block.(%s) vs lastblock.(%s) -> (%s)\n",height,histmode?"HIST":"",mp->timestamp,issue_getTime()-mp->timestamp,mp->blockidstr,mp->lastblock,nextblock);
             if ( histmode == 0 )
             {
                 mp->deadman = 0;
@@ -654,7 +639,7 @@ void init_NXThashtables(struct NXThandler_info *mp)
     struct NXT_asset *ap = 0;
     struct NXT_assettxid *tp = 0;
     struct NXT_guid *gp = 0;
-    static struct hashtable *NXTasset_txids,*NXTaddrs,*NXTassets,*NXTguids;
+    static struct hashtable *NXTasset_txids,*NXTaddrs,*NXTassets,*NXTguids,*NXTsyncaddrs;
     if ( NXTguids == 0 )
         NXTguids = hashtable_create("NXTguids",HASHTABLES_STARTSIZE,sizeof(struct NXT_guid),((long)&gp->guid[0] - (long)gp),sizeof(gp->guid),((long)&gp->H.modified - (long)gp));
     if ( NXTasset_txids == 0 )
@@ -663,13 +648,16 @@ void init_NXThashtables(struct NXThandler_info *mp)
         NXTassets = hashtable_create("NXTassets",HASHTABLES_STARTSIZE,sizeof(struct NXT_asset),((long)&ap->H.assetid[0] - (long)ap),sizeof(ap->H.assetid),((long)&ap->H.modified - (long)ap));
     if ( NXTaddrs == 0 )
         NXTaddrs = hashtable_create("NXTaddrs",HASHTABLES_STARTSIZE,sizeof(struct NXT_acct),((long)&np->H.NXTaddr[0] - (long)np),sizeof(np->H.NXTaddr),((long)&np->H.modified - (long)np));
+    if ( NXTsyncaddrs == 0 )
+        NXTsyncaddrs = hashtable_create("NXTsyncaddrs",HASHTABLES_STARTSIZE,sizeof(struct NXT_acct),((long)&np->H.NXTaddr[0] - (long)np),sizeof(np->H.NXTaddr),((long)&np->H.modified - (long)np));
     if ( mp != 0 )
     {
         mp->NXTguid_tablep = &NXTguids;
         mp->NXTaccts_tablep = &NXTaddrs;
+        mp->NXTsyncaddrs_tablep = &NXTsyncaddrs;
         mp->NXTassets_tablep = &NXTassets;
         mp->NXTasset_txids_tablep = &NXTasset_txids;
-        printf("hist.%d init_NXThashtables: %p %p %p %p\n",mp->histmode,NXTguids,NXTaddrs,NXTassets,NXTasset_txids);
+        printf("hist.%d init_NXThashtables: %p %p %p %p %p\n",mp->histmode,NXTguids,NXTaddrs,NXTassets,NXTasset_txids,NXTsyncaddrs);
     }
 }
 
@@ -678,9 +666,6 @@ void start_NXTloops(struct NXThandler_info *mp,char *histstart)
     static struct NXThandler_info histM;
     //mp->RTmp = mp;
     //printf("start_NXTloops\n");
-    init_NXThashtables(mp);
-    if ( pthread_create(malloc(sizeof(pthread_t)),NULL,process_hashtablequeues,mp) != 0 )
-        printf("ERROR hist process_hashtablequeues\n");
     if ( histstart != 0 && histstart[0] != 0 )
     {
         histM = *mp;
