@@ -264,30 +264,19 @@ int32_t process_NXT_event(struct NXThandler_info *mp,int32_t histmode,char *txid
     {
         if ( (p= NXThandlers[i]) != 0 )
         {
-            //if ( assetid != 0 && strcmp(assetid,DOGE_COINASSET) == 0 )
-            //printf("type.%ld subtype.%ld vs (%d %d) AMhdr.%p\n",(long)type,(long)subtype,p->type,p->subtype,AMhdr);
             if ( AMhdr != 0 || ((p->type < 0 || p->type == type) && (p->subtype < 0 || p->subtype == subtype)) )
             {
-                //if ( assetid != 0 && strcmp(assetid,DOGE_COINASSET) == 0 )
-                //    printf("assetid.%p assetlist.%p\n",assetid,p->assetlist);
                 if ( AMhdr != 0 )
                 {
-                    //printf("%x vs %x nxt.%lx\n",p->AMsigfilter,AMhdr->sig,(long)AMhdr->nxt64bits);
                     if ( p->AMsigfilter != 0 && p->AMsigfilter != AMhdr->sig )
                         continue;
-                    //if ( strcmp(sender,NXTISSUERACCT) == 0 )
-                    //    expand_nxt64bits(sender,AMhdr->nxt64bits);
                 }
                 else if ( p->assetlist != 0 && assetid != 0 && listcmp(p->assetlist,assetid) != 0 )
                     continue;
-               //if ( assetid != 0 && strcmp(assetid,DOGE_COINASSET) == 0 )
-               //     printf("AMhdr.%p whitelist.%p listcmp %d %s receiver.%s\n",AMhdr,p->whitelist,listcmp(p->whitelist,sender),sender,receiver);
                 if ( strcmp(sender,GENESISACCT) == 0 || strcmp(receiver,GENESISACCT) == 0 || //is_gateway_addr(sender) != 0 ||
                      (AMhdr == 0 || p->whitelist == 0 || listcmp(p->whitelist,sender) == 0) ||
                      (AMhdr != 0 && cmp_nxt64bits(sender,AMhdr->nxt64bits) == 0) )
                 {
-                    //if ( assetid != 0 && strcmp(assetid,DOGE_COINASSET) == 0 )
-                    //   printf("priority.%d vs %d assetoshis %.8f (%s)\n",p->priority,highest_priority,dstr(assetoshis),comment);
                     if ( p->priority > highest_priority )
                     {
                         count = 1;
@@ -445,7 +434,6 @@ int32_t process_NXTtransaction(struct NXThandler_info *mp,int32_t histmode,char 
                     if ( comment[0] != 0 )
                         commentstr = tp->comment = clonestr(comment);
                     tp->quantity = get_cJSON_int(attachment,"quantityQNT");
-                    //printf("quantity.%ld\n",(long)tp->quantity);
                     assetoshis = tp->quantity;
                     switch ( subtype )
                     {
@@ -515,7 +503,6 @@ int32_t process_NXTblock(int32_t *heightp,char *nextblock,struct NXThandler_info
                 for (i=0; i<n; i++)
                 {
                     copy_cJSON(txid,cJSON_GetArrayItem(transactions,i));
-                    //printf("hist.%d i.%d of %ld process NXTtxid init_NXThashtables: %p %p %p %p\n",mp->histmode,i,(long)n,mp->NXTguid_tablep,mp->NXTaccts_tablep,mp->NXTassets_tablep, mp->NXTasset_txids_tablep);
                     if ( txid[0] != 0 )
                     {
                         //printf("%s ",txid);
@@ -547,7 +534,7 @@ int32_t NXTnetwork_healthy(struct NXThandler_info *mp)
 void *NXTloop(void *ptr)
 {
     struct NXThandler_info *mp = ptr;
-    int32_t i,height,histmode=0,numforging = 0;
+    int32_t height,histmode=0,numforging = 0;
     char nextblock[64],terminationblock[64];
     numforging = set_current_NXTblock(terminationblock);
     printf("NXTloop: %s\n",terminationblock);
@@ -579,22 +566,21 @@ void *NXTloop(void *ptr)
             if ( histmode == 0 )
             {
                 mp->deadman = 0;
+                mp->deadmantime = mp->timestamp;
+                call_handlers(mp,NXTPROTOCOL_NEWBLOCK);
                 if ( Historical_done != 0 )
-                {
-                    call_handlers(mp,NXTPROTOCOL_NEWBLOCK);
                     mp->RTflag++;   // wait for first block before doing any side effects
-                }
             }
             else if ( strcmp(nextblock,mp->lastblock) == 0 )
                 break;
         }
         if ( histmode == 0 )
         {
-            mp->deadman++;
+            mp->deadman = (issue_getTime() - mp->deadmantime);
             do
             {
                 //printf("hist.%d do while init_NXThashtables: %p %p %p %p\n",mp->histmode,mp->NXTguid_tablep,mp->NXTaccts_tablep,mp->NXTassets_tablep, mp->NXTasset_txids_tablep);
-                //if ( mp->upollseconds != 0 || NXTnetwork_healthy(mp) > 0 )
+                /*if ( mp->upollseconds != 0 || NXTnetwork_healthy(mp) > 0 )
                 {
                     if ( mp->upollseconds != 0 )
                     {
@@ -611,7 +597,9 @@ void *NXTloop(void *ptr)
                     }
                     gen_testforms();
                 }
-                //else sleep(mp->pollseconds);
+                //else*/
+                sleep(mp->pollseconds);
+                gen_testforms();
                 //printf("call set_next block\n");
                 set_next_NXTblock(nextblock,mp->blockidstr);
             }
@@ -621,12 +609,12 @@ void *NXTloop(void *ptr)
     if ( histmode != 0 )
     {
         mp = Global_mp;
-        printf("HIST Waiting for hashtable queue to catchup: %ld\n",(long)time(0));
+        printf("HIST Waiting for hashtable queue to catchup: %ld\n",time(0));
         while ( queue_size(&mp->hashtable_queue[0]) != 0 )
             usleep(1);
         while ( queue_size(&mp->hashtable_queue[1]) != 0 )
             usleep(1);
-        printf("HIST Historical processing has finished: %ld\n",(long)time(0));
+        printf("HIST Historical processing has finished: %ld\n",time(0));
         Historical_done = 1;
         while ( 1 ) sleep(1);
     }
@@ -666,19 +654,23 @@ void start_NXTloops(struct NXThandler_info *mp,char *histstart)
     static struct NXThandler_info histM;
     //mp->RTmp = mp;
     //printf("start_NXTloops\n");
+    portable_mutex_init(&Global_mp->hash_mutex);
+    portable_mutex_init(&Global_mp->hashtable_queue[0].mutex);
+    portable_mutex_init(&Global_mp->hashtable_queue[1].mutex);
+    //portable_mutex_init(&UDPsend_queue.mutex);
     if ( histstart != 0 && histstart[0] != 0 )
     {
         histM = *mp;
         histM.origblockidstr = histstart;
         histM.histmode = 1;
         init_NXThashtables(&histM);
-        if ( pthread_create(malloc(sizeof(pthread_t)),NULL,NXTloop,&histM) != 0 )
+        if ( portable_thread_create(NXTloop,&histM) == 0 )
             printf("ERROR start_Histloop\n");
     } else Historical_done = 1;
-    while ( Historical_done == 0 )
-        sleep(1);
-    if ( pthread_create(malloc(sizeof(pthread_t)),NULL,NXTloop,mp) != 0 )
-        printf("ERROR NXTloop\n");
+   // while ( Historical_done == 0 )
+   //     sleep(1);
+ //   if ( portable_thread_create(NXTloop,mp) == 0 )
+//        printf("ERROR NXTloop\n");
 
     //printf("after start init_NXThashtables: %p %p %p %p\n",mp->NXTguid_tablep,mp->NXTaccts_tablep,mp->NXTassets_tablep, mp->NXTasset_txids_tablep);
  //   NXTloop(mp);
