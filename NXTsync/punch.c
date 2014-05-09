@@ -50,9 +50,9 @@ static int make_udp_socket(int port)
         slog_error("UDP bind");
     else
         return(fd);
-    printf("make_udp_socket close fd.%d\n",fd);
-    if ( fd >= 0 )
-        close(fd);
+   // printf("make_udp_socket close fd.%d\n",fd);
+   // if ( fd >= 0 )
+   //     close(fd);
     return(-1);
 }
 
@@ -76,9 +76,9 @@ static int make_tcp_socket(int port)
     else if (listen(fd, 4) < 0)
         slog_error("TCP listen");
     else return fd;
-    printf("make_tcp_socket close fd.%d\n",fd);
-    if ( fd >= 0 )
-        close(fd);
+    //printf("make_tcp_socket close fd.%d\n",fd);
+    //if ( fd >= 0 )
+    //    close(fd);
     return(-1);
 }
 
@@ -285,7 +285,7 @@ static void receive_udp_punch(int sock)
         printf("UDP_PUNCH.(%s) (%s) (%s) (%s) tag.(%s) %p %p %p\n",user,id,group,pubkey,tag,pg,pc,target);
         if ( pc == 0 )
         {
-            //close(sock);
+            //portable_close_socket(sock);
             slog(": Unrecognized UDP client at %s (ID %s)\n",print_host_address(&addr), id);
         }
         else if ( pg != 0 && pc->group != 0 && target != 0 && target->user[0] != 0 )
@@ -476,7 +476,7 @@ static int serve(int tcp,int udp,int udp_echo)
     if ( s == 0 )
     {
        // receive_udp_echo(udp_echo,1);
-        ping_all(Global_mp->NXTADDR,0,0);
+        ping_all(Global_mp->NXTADDR);//,0,0);
     }
   //printf("serve returns s.%d\n",s);
     return(s);
