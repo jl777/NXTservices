@@ -115,9 +115,14 @@ uint64_t calc_nxt64bits(char *NXTaddr)
     int64_t n,i;
     uint64_t lastval,mult,nxt64bits = 0;
     n = strlen(NXTaddr);
-    if ( n >= 64 )
+    if ( n >= 22 )
     {
         printf("calc_nxt64bits: illegal NXTaddr.(%s) too long\n",NXTaddr);
+        return(0);
+    }
+    else if ( strcmp(NXTaddr,"0") == 0 )
+    {
+       // printf("zero address?\n"); getchar();
         return(0);
     }
     mult = 1;
@@ -131,13 +136,12 @@ uint64_t calc_nxt64bits(char *NXTaddr)
             return(0);
         }
         nxt64bits += mult * (c - '0');
-        //printf("%ld of %ld: %lx mult %lu * %d\n",(long)i,(long)n,(unsigned long)nxt64bits,(unsigned long)mult,(c-'0'));
         if ( nxt64bits < lastval )
-            printf("calc_nxt64bits: warning: 64bit overflow %lx < %lx\n",(unsigned long)nxt64bits,(unsigned long)lastval);
+            printf("calc_nxt64bits: warning: 64bit overflow %llx < %llx\n",(long long)nxt64bits,(long long)lastval);
         lastval = nxt64bits;
     }
     if ( cmp_nxt64bits(NXTaddr,nxt64bits) != 0 )
-        printf("error calculating nxt64bits: %s -> %lx -> %s\n",NXTaddr,(long)nxt64bits,nxt64str(nxt64bits));
+        printf("error calculating nxt64bits: %s -> %llx -> %s\n",NXTaddr,(long long)nxt64bits,nxt64str(nxt64bits));
     return(nxt64bits);
 }
 
@@ -529,6 +533,7 @@ uint32_t _crc32(uint32_t crc, const void *buf, size_t size)
 	return crc ^ ~0U;
 }
 
+#ifndef __linux__
 char *strsep(char **stringp,const char *delim)
 {
 	char *s;
@@ -552,4 +557,6 @@ char *strsep(char **stringp,const char *delim)
 		} while (sc != 0);
 	}
 }
+#endif
+
 #endif
