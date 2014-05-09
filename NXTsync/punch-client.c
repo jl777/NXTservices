@@ -27,7 +27,7 @@
 
 // Function: get_correspondent_address
 // Extract the correspondent name/group, IP address and UDP port number from the punch request.
-static member_t *get_correspondent_address(char *request)
+member_t *get_correspondent_address(char *request)
 {
     uint32_t ipbits;
     uint64_t nxt64bits;
@@ -61,7 +61,7 @@ static member_t *get_correspondent_address(char *request)
             pm->addr.sin_port = htons(port_nr);
             pm->addr.sin_family = AF_INET;
             //inet_aton(ipaddr,&pm->addr.sin_addr);
-            *(uint32_t *)&pm->addr.sin_addr = ipbits;//inet_addr(ipaddr);
+            *(uint32_t *)&pm->addr.sin_addr = inet_addr(ipaddr);
             if ( strcmp(ipaddr,inet_ntoa(pm->addr.sin_addr)) != 0 )
                 printf("problem with sin_addr %s != %s\n",ipaddr,inet_ntoa(pm->addr.sin_addr));
             pm->have_address = 1;
@@ -81,63 +81,9 @@ static member_t *get_correspondent_address(char *request)
     return(0);
 }
 
-// Function: tcp_io
-// Handler for traffic on the server TCP connection.
-// - group member additions or deletions
-// - punch requests
-static void tcp_io(int tcp_socket,char *servername,char *connect_id)
-{
-    char buf[TCP_MESSAGE_MAX];
-    char *line = buf;
-    long n;
-    if ( tcp_socket < 0 )
-        return;
-    memclear(buf);
-    if ( (n= read(tcp_socket,buf,sizeof(buf) - 1)) < 0 )
-    {
-        perror("FATAL: tcp read");
-        EXIT_FLAG = 1;
-        return;
-       // exit(1);
-    }
-    else if ( n == 0 )
-    {
-        fprint(stderr, "server closed connection\n");
-        EXIT_FLAG = 1;
-        return;
-    }
-    //printf("TCP.(%s)\n",line);
-    while( line[0] != 0 ) // for each line of input
-    {            
-        char *s = stgsep(&line, "\n\r");
-        if ( *s == '+' )
-            member_add(Global_mp->groupname,++s);
-        else if ( *s == '-' )
-            member_del(++s);
-        else if ( strchr("><!", *s) != 0 )
-        {
-            member_t *pm = get_correspondent_address(&s[1]);
-            if ( pm == 0 )            // punch denied
-                fprint(stdout, "punch denied\n");
-            else if ( *s == '<' )
-                ping_all(Global_mp->NXTADDR,servername,connect_id);
-            else if ( *s == '>')
-            {
-                punch(pm,PUNCH_CONFIRM,servername,connect_id);
-                ping_all(Global_mp->NXTADDR,0,0);
-            }
-        }
-        else
-        {
-            fprint(stderr, "unknown tcp traffic : '%s'\n", s);
-            return;
-        }
-    }
-}
-
 // Function: close_connection
 // Close connections named in the command.
-static void close_connection(char *cmd)
+void close_connection(char *cmd)
 {
     member_t *pm;
     stgsep(&cmd, " \t");
@@ -159,21 +105,21 @@ static void close_connection(char *cmd)
 
 // Function: set_status
 // Report new status to he server.
-static void send_status(int server_tcp,char *cmd)
+void send_status(portable_tcp_t *tcp,char *cmd)
 {
     char *s = stgstrip(cmd,punch_whitespace);
     if ( *s != 0 && is_printable(s) != 0 )
     {
         char buf[STATUS_SIZE + 1] = "=";
         stgncpy(&buf[1],s,sizeof buf-1);
-        if ( send(server_tcp,buf,strlen(buf)+1,0) < 0 )
+        if ( portable_tcp_send(tcp,buf,(int32_t)strlen(buf)+1) < 0 ) //if ( send(server_tcp,buf,strlen(buf)+1,0) < 0 )
             perror("send status");
     }
 }
 
 // Function: terminal_command
 // Execute the user command. Commands are prefixed by '/' (stripped by  <terminal_io>)
-static void terminal_command(int server_tcp,char *cmd,char *servername,char *connect_id)
+void terminal_command(portable_tcp_t *tcp,char *cmd,char *servername,char *connect_id)
 {
     member_t *pm;
     printf("cmd.(%s)\n",cmd);
@@ -198,7 +144,7 @@ static void terminal_command(int server_tcp,char *cmd,char *servername,char *con
     else if ( strncmp(cmd,"status",6) == 0 )
     {
         printf("status\n");
-        send_status(server_tcp,cmd + 6);
+        send_status(tcp,cmd + 6);
     }
     else if ( strcmp(cmd,"bell") == 0 )
     {
@@ -220,14 +166,16 @@ static void terminal_command(int server_tcp,char *cmd,char *servername,char *con
 // commands.  A ? gets a list of members.  Text prefixed by @username is sent
 // to that single correspondent user (if corresponding) otherwise all other
 // text is sent to all correspondent clients.
-static void terminal_io(int server_tcp,char *servername,char *connect_id)
+void terminal_io(char *line,portable_tcp_t *tcp,char *servername,char *connect_id)
 {
     static char prevline[1024];
-    char line[1024];
+    //char line[1024];
     long n;
-    memclear(line);
+   // memclear(line);
     prompt_again = 1;
-    if ( (n= read(STDIN_FILENO, line, sizeof line - 1)) < 0 )
+    n = strlen(line);
+    //printf("TERMINALIO.(%s) len.%ld\n",line,n);
+    if ( n < 0 )//(n= read(STDIN_FILENO, line, sizeof line - 1)) < 0 )
     {
         perror("FATAL: read stdin");
         memset(Global_mp->groupname,0,sizeof(Global_mp->groupname));
@@ -248,16 +196,16 @@ static void terminal_io(int server_tcp,char *servername,char *connect_id)
     if ( (line[0] & 0xff) == 0xef )
         strcpy(line,prevline);
     else strcpy(prevline,line);
-    //printf("line.(%s) %x\n",line,line[0]);
+    printf("line.(%s) %x\n",line,line[0]);
     if ( n == 0 )
         timeout_connections();
     else if ( n == 1 && *line == '?' )
         members_list();
     else if ( *line == '/' )
     {
-        if ( server_tcp >= 0 )
-            terminal_command(server_tcp,&line[1],servername,connect_id);
-        else printf("no Punch server available\n");
+        //if ( tcp->io_watcher.fd >= 0 )
+            terminal_command(tcp,&line[1],servername,connect_id);
+        //else printf("no Punch server available\n");
     }
     else if ( Global_mp->corresponding > 0 )
     {
@@ -270,17 +218,18 @@ static void terminal_io(int server_tcp,char *servername,char *connect_id)
 
 // Function: get_fdset
 // Fill an fdset for select() with the descriptors of all open socket and stdin.
-static int get_fdset(int server_sock,fd_set *fdset)
+int get_fdset(portable_tcp_t *tcp,fd_set *fdset)
 {
-    int max = -1;
-    member_t *pm = member_list;
+    int max = STDIN_FILENO;
     FD_ZERO(fdset);
-    if ( server_sock >= 0 )
-    {
-        FD_SET(server_sock,fdset);
-        max = server_sock;
-    }
     FD_SET(STDIN_FILENO,fdset);
+#ifdef OLDWAY
+    if ( *tcp >= 0 )
+    {
+        FD_SET(*tcp,fdset);
+        max = *tcp;
+    }
+    member_t *pm = member_list;
     while ( pm != 0 )
     {
         if ( pm->fd >= 0 )
@@ -290,22 +239,77 @@ static int get_fdset(int server_sock,fd_set *fdset)
         }
         pm = pm->next;
     }
+#endif
     return(max);
+}
+
+// Function: tcp_io
+// Handler for traffic on the server TCP connection.
+// - group member additions or deletions
+// - punch requests
+void tcp_io(char *line,long n,char *servername,char *connect_id)
+{
+    //char *line = buf;
+    //long n;
+    //if ( tcp_socket < 0 )
+    //    return;
+    //memclear(buf);
+    if ( n < 0 )//(n= read(tcp_socket,buf,sizeof(buf) - 1)) < 0 )
+    {
+        perror("FATAL: tcp read");
+        EXIT_FLAG = 1;
+        return;
+        // exit(1);
+    }
+    else if ( n == 0 )
+    {
+        fprint(stderr, "server closed connection\n");
+        EXIT_FLAG = 1;
+        return;
+    }
+    //printf("TCP.(%s)\n",line);
+    while( line[0] != 0 ) // for each line of input
+    {
+        char *s = stgsep(&line, "\n\r");
+        if ( *s == '+' )
+            member_add(Global_mp->groupname,++s);
+        else if ( *s == '-' )
+            member_del(++s);
+        else if ( strchr("><!", *s) != 0 )
+        {
+            member_t *pm = get_correspondent_address(&s[1]);
+            if ( pm == 0 )            // punch denied
+                fprint(stdout, "punch denied\n");
+            else if ( *s == '<' )
+                ping_all(Global_mp->NXTADDR);//,servername,connect_id);
+            else if ( *s == '>')
+            {
+                punch(pm,PUNCH_CONFIRM,servername,connect_id);
+                ping_all(Global_mp->NXTADDR);//,0,0);
+            }
+        }
+        else
+        {
+            fprint(stderr, "unknown tcp traffic : '%s'\n", s);
+            return;
+        }
+    }
 }
 
 // Function: wait_for_input
 // Wait for activity on the TCP server connection, on UDP connections to
 // correspondent clients and on stdin.  Every minute ping correspondents to keep connections alive.
-static int wait_for_input(int32_t server_tcp,char *servername,char *connect_id)
+/*static int wait_for_input(portable_tcp_t *tcp,char *servername,char *connect_id)
 {
     int fastmicros = 100;
     static uint32_t counter;
     struct timeval timeout;
     fd_set fdset;
-    int i,s,n,fd,maxfd = get_fdset(server_tcp,&fdset);
+    int s,n,fd,maxfd = get_fdset(tcp,&fdset);
     counter++;
     timeout.tv_sec  = Global_mp->corresponding ? 0 : PING_INTERVAL;
     timeout.tv_usec  = Global_mp->corresponding ? fastmicros : 0;
+    //printf("tcp.fd %d\n",tcp->io_watcher.fd);
     if ( (s= select(maxfd+1,&fdset,NULL,NULL,&timeout)) < 0 )
         return(0);//perror("select");
     for (fd=0,n=s; (n > 0)&&(fd < FD_SETSIZE); ++fd)
@@ -315,24 +319,42 @@ static int wait_for_input(int32_t server_tcp,char *servername,char *connect_id)
             continue;
         --n;
         if ( fd == STDIN_FILENO )
-            terminal_io(server_tcp,servername,connect_id);
-        else if ( fd == server_tcp )
-            tcp_io(server_tcp,servername,connect_id);
-        else client_udp_io(fd);
+            terminal_io(tcp,servername,connect_id);
+#ifdef OLDWAY
+        else if ( fd == *tcp )
+        {
+            char buf[TCP_MESSAGE_MAX];
+            long len;
+            memset(buf,0,sizeof(buf));
+            len = portable_tcp_read(tcp,buf,(int32_t)sizeof(buf) - 1,1000000);
+            //printf("GOTTCP.(%s)\n",buf);
+            tcp_io(buf,len,servername,connect_id);
+        }
+       else client_udp_io(fd);
+#endif
     }
+#ifdef OLDWAY
+    int i;
     for (i=0; i<1;i++)
-        if ( process_syncmem_queue(server_tcp,servername,connect_id) <= 0 )
+        if ( process_syncmem_queue() <= 0 )
             break;
+#else
+    if ( TCP_bytes_avail > 0 )
+    {
+        tcp_io((void *)TCP_bytes,TCP_bytes_avail,servername,connect_id);
+        TCP_bytes_avail = 0;
+    }
+#endif
     if ( s == 0  )
     {
         if ( (Global_mp->corresponding == 0 && (counter % 10) == 0) || (Global_mp->corresponding != 0 && (counter % ((1000000/fastmicros)*10)) == 0) )
         {
-            //printf("ping_all ");
+            printf("ping_all ");
             ping_all(Global_mp->NXTADDR,servername,connect_id);
         }
     }
     return(s);
-}
+}*/
 
 int set_intro(char *intro,int size,char *user,char *group,char *NXTaddr)
 {
@@ -350,42 +372,47 @@ int set_intro(char *intro,int size,char *user,char *group,char *NXTaddr)
     return(0);
 }
 
-int contact_punch_server(char *servername,char *connect_id,int max,char *intro)
+int contact_punch_server(uv_connect_t *connect,portable_tcp_t *tcp,char *servername,char *connect_id,int32_t max,char *intro)
 {
-    int server_tcp;
     struct sockaddr_in addr;
     char ok[128];
     //memclear(connect_id);
     //memclear(ok);
+    Enable_tcp_dispatch = 0;
     memset(ok,0,sizeof(ok));
     if ( server_address(servername,NXT_PUNCH_PORT,&addr) < 0 )
         fprint(stderr, "no address\n");
-    else if ( (server_tcp= server_connect_tcp(&addr,sizeof addr)) < 0 )
-    {
-        fprint(stderr, "no TCP connection to %s\n",servername);
-    }
     else
     {
-        if ( read(server_tcp,connect_id,max - 1) <= 0 )
-            perror("read connection id");
-        else if ( strncmp(connect_id, "id:", 3) )
-            fprint(stderr, "server rejected connection: %s\n", connect_id);
+        if ( portable_tcp_connect(connect,tcp,&addr,0,3000000) < 0 ) //if ( (server_tcp= server_connect_tcp(&addr,sizeof addr)) < 0 )
+            fprint(stderr, "no TCP connection to %s\n",servername);
         else
         {
-            printf("recv.(%s)\n",connect_id);
-            if ( send(server_tcp,intro,strlen(intro)+1,0) < 0 )
-                perror("send intro");
-            else if ( read(server_tcp, ok, sizeof ok - 1) <= 0 )
-                perror("read intro status");
-            else if ( strncmp(ok, "ok", 2) )
-                fprint(stderr, "server rejected user/group: %s\n", ok);
-            else if ( send(server_tcp, "?", 2, 0) < 0 )
-                perror("send list request");
+            if ( portable_tcp_read(tcp,connect_id,max - 1,3000000) <= 0 )
+                perror("read connection id");
+            else if ( strncmp(connect_id, "id:", 3) )
+                fprint(stderr, "server rejected connection: %s\n", connect_id);
             else
             {
-                fprint(stdout, "Connection %s\n", connect_id);
-                add_punch_server(servername);
-                return(server_tcp);
+                printf("recv.(%s)\n",connect_id);
+//#ifdef OLDWAY
+                if ( portable_tcp_send(tcp,intro,(int32_t)strlen(intro)+1) < 0 ) //if ( send(server_tcp,intro,strlen(intro)+1,0) < 0 )
+                    perror("send intro");
+                else
+//#endif
+                if ( portable_tcp_read(tcp,ok,sizeof(ok) - 1,3000000) <= 0 )
+                    perror("read intro status");
+                else if ( strncmp(ok,"ok",2) != 0 )
+                    fprint(stderr, "server rejected user/group: %s\n", ok);
+                else if ( portable_tcp_send(tcp,"?",2) < 0 ) // else if ( send(server_tcp, "?", 2, 0) < 0 )
+                    perror("send list request");
+                else
+                {
+                    fprint(stdout, "tcp Connection %s\n",connect_id);
+                    add_punch_server(servername);
+                    Enable_tcp_dispatch = 1;
+                    return(0);
+                }
             }
         }
     }
@@ -395,14 +422,18 @@ int contact_punch_server(char *servername,char *connect_id,int max,char *intro)
 void *run_NXTsync(void *_servername)
 {
     char *servername = _servername;
-    int server_tcp;
-    char intro[INTRO_SIZE + 1],dispname[128],groupname[128],NXTaddr[128],connect_id[512];
+    portable_tcp_t *tcp;
+    uv_connect_t *connect;
+    char intro[INTRO_SIZE + 1],dispname[128],groupname[128],NXTaddr[128],connect_id[512],line[512];
     //int32_t NXTsync_dispatch(void **ptrp,void *ignore);
     //init_pingpong_queue(&NXTsync_received,"NXTsync_received",NXTsync_dispatch,0,0);
     printf("init_NXTsync %s %s %s\n",Global_mp->dispname,Global_mp->NXTADDR,Global_mp->groupname);
     strcpy(dispname,Global_mp->dispname);
     strcpy(groupname,Global_mp->groupname);
     strcpy(NXTaddr,Global_mp->NXTADDR);
+    tcp = &Global_mp->Punch_tcp; connect = &Global_mp->Punch_connect;
+    memset(tcp,0,sizeof(*tcp));
+    memset(connect,0,sizeof(*connect));
     if ( get_options(0,0,dispname,groupname,NXTaddr) < 0 )
     {
         printf("init_NXTsync: Invalid options, try again\n");
@@ -418,25 +449,34 @@ void *run_NXTsync(void *_servername)
             sleep(30);
             continue;
         }
-        printf("got connect_id.%s intro.%s\n",connect_id,intro);
-        if ( (server_tcp= contact_punch_server(servername,connect_id,sizeof(connect_id),intro)) < 0 )
+        printf("created intro.%s\n",intro);
+        if ( contact_punch_server(connect,tcp,servername,connect_id,sizeof(connect_id),intro) < 0 )
         {
             printf("init_NXTsync: error contacting (%s), try again\n",servername);
             sleep(30);
             continue;
         }
-        strcpy(Global_mp->connect_id,connect_id);
-        strcpy(Global_mp->servername,servername);
-        Global_mp->server_tcp = server_tcp;
+        strcpy(Global_mp->Punch_connect_id,connect_id);
+        strcpy(Global_mp->Punch_servername,servername);
+        //Global_mp->server_tcp = server_tcp;
         printf("Start NXTsync\n");
         EXIT_FLAG = 0;
         while ( EXIT_FLAG == 0 )
         {
             prompt(Global_mp->dispname,Global_mp->groupname);
-            if ( wait_for_input(server_tcp,servername,connect_id) < 0 )
+#ifdef OLDWAY
+            if ( wait_for_input(tcp,servername,connect_id) < 0 )
                 break;
+#else
+            while ( fgets(line,sizeof(line),stdin) > 0 )
+            {
+               // printf("line.(%s)\n",line);
+                terminal_io(line,tcp,servername,connect_id);
+            }
+#endif
         }
-        close(server_tcp), server_tcp = -1;
+        //close(server_tcp), server_tcp = -1;
+        portable_tcp_close(tcp);
         printf("NXTsync %s finished\n",servername);
         sleep(10);
     }
@@ -445,10 +485,14 @@ void *run_NXTsync(void *_servername)
 
 int punch_client_main(int argc, char ** argv)
 {
+    uv_connect_t connect;
+    portable_tcp_t tcp;
     uint16_t port;
-    int i,server_tcp;
+    int i;
     char connect_id[512],intro[INTRO_SIZE + 1],servername[32],dispname[128],groupname[128],NXTaddr[128],otherNXTaddr[128];
     printf("punch_client_main argc.%d [%s]\n",argc,Global_mp->NXTACCTSECRET);
+    memset(&tcp,0,sizeof(tcp));
+    memset(&connect,0,sizeof(connect));
     while ( 1 )
     {
         strcpy(dispname,Global_mp->dispname);
@@ -476,19 +520,23 @@ int punch_client_main(int argc, char ** argv)
                 continue;
             }
             memset(connect_id,0,sizeof(connect_id));
-            if ( get_rand_ipaddr(otherNXTaddr,&port,servername) != 0 && (server_tcp= contact_punch_server(servername,connect_id,sizeof(connect_id),intro)) >= 0 )
+            if ( get_rand_ipaddr(otherNXTaddr,&port,servername) != 0 && contact_punch_server(&connect,&tcp,servername,connect_id,sizeof(connect_id),intro) < 0 )
             {
                 EXIT_FLAG = 0;
                 break;
             }
-            if ( wait_for_input(server_tcp,servername,connect_id) < 0 )
+#ifdef OLDWAY
+            if ( wait_for_input(&tcp,servername,connect_id) < 0 )
                 break;
+#endif
         }
         while ( EXIT_FLAG == 0 )
         {
             prompt(Global_mp->dispname,Global_mp->groupname);
-            if ( wait_for_input(server_tcp,servername,connect_id) < 0 )
+#ifdef OLDWAY
+            if ( wait_for_input(&tcp,servername,connect_id) < 0 )
                 break;
+#endif
         }
         printf("punch client finished\n");
     }
