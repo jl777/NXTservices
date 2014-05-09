@@ -51,10 +51,12 @@ struct NXT_acct
     uint64_t *quantities;
     struct NXT_assettxid_list **txlists;    // one list for each asset in acct
     int32_t maxassets,numassets,numcoinaccts;
+
     // fields for NXTorrent
     double hisfeedbacks[6],myfb_tohim[6];    // stats on feedbacks given
     // fields for RT comms
-    int32_t Usock,recvid,sentid;
+    portable_udp_t Usock;
+    int32_t recvid,sentid;
     struct sockaddr Uaddr;
     struct udp_info U;
     char dispname[128];
