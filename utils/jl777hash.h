@@ -29,11 +29,15 @@ struct hashpacket
 
 extern int32_t Historical_done;
 
-#define QUEUE_INITIALIZER(buffer) { buffer, sizeof(buffer) / sizeof(buffer[0]), 0, 0, 0, PTHREAD_MUTEX_INITIALIZER, PTHREAD_COND_INITIALIZER, PTHREAD_COND_INITIALIZER }
 
 void queue_enqueue(queue_t *queue,void *value)
 {
-	pthread_mutex_lock(&(queue->mutex));
+    if ( queue->initflag == 0 )
+    {
+        portable_mutex_init(&queue->mutex);
+        queue->initflag = 1;
+    }
+	portable_mutex_lock(&(queue->mutex));
 	while ( queue->size == queue->capacity )
     {
         queue->capacity++;
@@ -46,14 +50,19 @@ void queue_enqueue(queue_t *queue,void *value)
 	++queue->size;
 	++queue->in;
 	queue->in %= queue->capacity;
-	pthread_mutex_unlock(&(queue->mutex));
+	portable_mutex_unlock(&(queue->mutex));
 	//pthread_cond_broadcast(&(queue->cond_empty));
 }
 
 void *queue_dequeue(queue_t *queue)
 {
     void *value = 0;
-	pthread_mutex_lock(&(queue->mutex));
+    if ( queue->initflag == 0 )
+    {
+        portable_mutex_init(&queue->mutex);
+        queue->initflag = 1;
+    }
+    portable_mutex_lock(&(queue->mutex));
 	//while ( queue->size == 0 )
 	//	pthread_cond_wait(&(queue->cond_empty), &(queue->mutex));
     if ( queue->size > 0 )
@@ -65,25 +74,28 @@ void *queue_dequeue(queue_t *queue)
         ++queue->out;
         queue->out %= queue->capacity;
     }
-	pthread_mutex_unlock(&(queue->mutex));
+	portable_mutex_unlock(&(queue->mutex));
 	//pthread_cond_broadcast(&(queue->cond_full));
 	return value;
 }
 
 int32_t queue_size(queue_t *queue)
 {
-	pthread_mutex_lock(&(queue->mutex));
+    if ( queue->buffer == 0 )
+        portable_mutex_init(&queue->mutex);
+	portable_mutex_lock(&(queue->mutex));
 	int32_t size = queue->size;
-	pthread_mutex_unlock(&(queue->mutex));
+	portable_mutex_unlock(&(queue->mutex));
 	return size;
 }
 
-void init_pingpong_queue(struct pingpong_queue *ppq,char *name,int32_t (*action)(),queue_t *destq,queue_t *errorq)
+int32_t init_pingpong_queue(struct pingpong_queue *ppq,char *name,int32_t (*action)(),queue_t *destq,queue_t *errorq)
 {
     ppq->name = name;
     ppq->destqueue = destq;
     ppq->errorqueue = errorq;
     ppq->action = action;
+    return(queue_size(&ppq->pingpong[0]) + queue_size(&ppq->pingpong[1]));  // init mutex side effect
 }
 
 // seems a bit wastefull to do all the two iter queueing/dequeuing with threadlock overhead
@@ -313,7 +325,7 @@ void *MTadd_hashtable(int32_t *createdflagp,struct hashtable **hp_ptr,char *key)
         return(add_hashtable(createdflagp,hp_ptr,key));
     else
     {
-        pthread_mutex_lock(&Global_mp->hash_mutex);
+        //portable_mutex_lock(&Global_mp->hash_mutex);
         ptr = calloc(1,sizeof(*ptr));
         ptr->createdflagp = createdflagp;
         ptr->hp_ptr = hp_ptr;
@@ -331,7 +343,7 @@ void *MTadd_hashtable(int32_t *createdflagp,struct hashtable **hp_ptr,char *key)
         result = ptr->result;
         free(ptr);
         Global_mp->hashprocessing = 0;
-        pthread_mutex_unlock(&Global_mp->hash_mutex);
+       // portable_mutex_unlock(&Global_mp->hash_mutex);
         return(result);
     }
 }
@@ -345,7 +357,7 @@ uint64_t MTsearch_hashtable(struct hashtable **hp_ptr,char *key)
         return(search_hashtable(hp,key));
     else
     {
-        pthread_mutex_lock(&Global_mp->hash_mutex);
+        //portable_mutex_lock(&Global_mp->hash_mutex);
         ptr = calloc(1,sizeof(*ptr));
         ptr->hp_ptr = hp_ptr;
         ptr->key = key;
@@ -362,7 +374,7 @@ uint64_t MTsearch_hashtable(struct hashtable **hp_ptr,char *key)
         hashval = ptr->hashval;
         free(ptr);
         Global_mp->hashprocessing = 0;
-        pthread_mutex_unlock(&Global_mp->hash_mutex);
+        //portable_mutex_unlock(&Global_mp->hash_mutex);
         return(hashval);
     }
 }
@@ -374,7 +386,7 @@ void *process_hashtablequeues(void *_p) // serialize hashtable functions
     while ( 1 )//Historical_done == 0 )
     {
         usleep(1 + Historical_done*1000);
-        //pthread_mutex_lock(&Global_mp->hash_mutex);
+        //portable_mutex_lock(&Global_mp->hash_mutex);
         //Global_mp->hashprocessing = 1;
         for (iter=0; iter<2; iter++)
         {
@@ -393,7 +405,7 @@ void *process_hashtablequeues(void *_p) // serialize hashtable functions
             }
         }
         //Global_mp->hashprocessing = 0;
-        //pthread_mutex_unlock(&Global_mp->hash_mutex);
+        //portable_mutex_unlock(&Global_mp->hash_mutex);
     }
     printf("finished processing hashtable MT queues\n");
     exit(0);
