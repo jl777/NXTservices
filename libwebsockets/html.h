@@ -299,11 +299,11 @@ int gen_redeem_fields(char *NXTaddr,char *handler,char *name,char **fields,char 
 
 int multigateway_forms(char *NXTaddr,char **forms,char **scripts)
 {
-    int coinid,n = 0;
-    char buf[512],*str;
-    int64_t quantity,unconfirmed;
-    sprintf(buf,"NXT address %s (NXT %.8f) ",NXTaddr,dstr(issue_getBalance(NXTaddr)));
-    for (coinid=0; coinid<64; coinid++)
+    int n = 0; //coinid,
+    //char buf[512],*str;
+    //int64_t quantity,unconfirmed;
+    //sprintf(buf,"NXT address %s (NXT %.8f) ",NXTaddr,dstr(issue_getBalance(NXTaddr)));
+    /*for (coinid=0; coinid<64; coinid++)
     {
         str = coinid_str(coinid);
         if ( strcmp(str,ILLEGAL_COIN) != 0 )
@@ -314,7 +314,7 @@ int multigateway_forms(char *NXTaddr,char **forms,char **scripts)
         }
     }
     strcat(buf,"<br/><br/>\n");
-    //forms[n++] = clonestr(buf);
+    //forms[n++] = clonestr(buf);*/
     forms[n] = make_form(NXTaddr,&scripts[n],"changeurl","Change this websockets default page","change","127.0.0.1:7777","multigateway",gen_changeurl_fields);
     n++;
     forms[n] = make_form(NXTaddr,&scripts[n],"genDepositaddrs","Update coin addresses","submit","127.0.0.1:7777","multigateway",gen_register_fields);
@@ -396,6 +396,25 @@ int subatomic_forms(char *NXTaddr,char **forms,char **scripts)
     return(n);
 }
 
+int gen_nodecoin_cashout_fields(char *NXTaddr,char *handler,char *name,char **fields,char **scriptp)
+{
+    int n = 0;
+    char script[65536];
+    sprintf(script,"function click_%s()\n{\n\tlocation.href = 'http://127.0.0.1:7777/%s?{\"requestType\":\"%s\",\"NXT\":\"%s\"}';\n}\n",name,handler,name,NXTaddr);
+    *scriptp = clonestr(script);
+    return(n);
+}
+
+int NXTcoinsco_forms(char *NXTaddr,char **forms,char **scripts)
+{
+    int n = 0;
+    char buf[512];
+    sprintf(buf,"Nodecoins available %.8f (cashout costs 1 NXT)",dstr(get_nodecoins_avail()));
+    forms[n] = make_form(NXTaddr,&scripts[n],"nodecoin_cashout",buf,"cashout","127.0.0.1:7777","NXTcoinsco",gen_nodecoin_cashout_fields);
+    n++;
+    return(n);
+}
+
 
 char *teststr = "<!DOCTYPE html>\
 <html>\
@@ -467,10 +486,14 @@ void gen_testforms()
     char *str;
     sprintf(testforms,"%s<br/><b>%s<br/> %s<br/>NXT.%s balance %.8f %s</b><br/>\n",teststr,Global_mp->dispname,PC_USERNAME[0]!=0?PC_USERNAME:"setAccountInfo on http://127.0.0.1:6876/test description={\"username\":\"your pc username\"}",Global_mp->NXTADDR,dstr(Global_mp->acctbalance),Global_mp->acctbalance == 0?"<- need to send NXT":"");
 
+    str = gen_handler_forms(Global_mp->NXTADDR,"NXTcoinsco","NXTcoins.co API test forms",NXTcoinsco_forms);
+    strcat(testforms,str);
+    free(str);
+    
     str = gen_handler_forms(Global_mp->NXTADDR,"NXTorrent","NXTorrent API test forms",NXTorrent_forms);
     strcat(testforms,str);
     free(str);
-
+    
     str = gen_handler_forms(Global_mp->NXTADDR,"subatomic","subatomic API test forms",subatomic_forms);
     strcat(testforms,str);
     free(str);
