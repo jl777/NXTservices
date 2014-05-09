@@ -96,12 +96,13 @@ member_t *member_find_ipbits(uint32_t ipbits)
 
 // Function: member_find_by_fd
 // Search the list for a member with the spcified socket file descriptor.
-member_t *member_find_by_fd(int fd)
+member_t *member_find_by_fd(portable_udp_t *fd)
 {
     member_t *pm = member_list;
     while ( pm != 0 )
     {
-        if ( pm->fd == fd && fd >= 0 )
+        if ( memcmp(&pm->fd,fd,sizeof(pm->fd)) == 0 && portable_isillegal_udp(fd) == 0 )
+        //if ( pm->fd == fd && (long)fd >= 0 )
             return(pm);
         pm = pm->next;
     }
@@ -162,9 +163,11 @@ static char *group_file_read(const char *filename)
         return(NULL);
     }
     pw[0] = '\0';
-    fgets(pw,sizeof pw,f);
-    s = pw + strcspn(pw, " \n\r");
-    *s = '\0';
+    if ( fgets(pw,sizeof pw,f) > 0 )
+    {
+        s = pw + strcspn(pw, " \n\r");
+        *s = '\0';
+    } else s = 0;
     fclose(f);
     return(pw);
 }
@@ -379,7 +382,7 @@ static member_t *member_create(char *groupname,const char *name,const char *NXTa
         stgncpy(pm->name,name,sizeof(pm->name));
         stgncpy(pm->NXTaddr,NXTaddr,sizeof(pm->NXTaddr));
         stgncpy(pm->status,status,sizeof(pm->status));
-        pm->fd = -1;
+        portable_set_illegaludp(&pm->fd);// pm->fd = -1;
         // link to global list
         pm->next = member_list;
         pm->prev = NULL;
@@ -428,6 +431,8 @@ static void member_del(char *s)
         member_t *next = pm->next;
         clear_pending_sync_files(pm);
         punch_cancel(pm);
+        //while ( queue_size(&UDPsend_queue) != 0 )
+        //    usleep(1000);
         free(pm);
         if ( prev != 0 )
             prev->next = next;
@@ -491,7 +496,7 @@ static int send_all(char *text)
 
 // Function: ping_all
 // Send something to the all correspondent addresses.
-static void ping_all(char *NXTaddr,char *servername,char *connect_id)
+static void ping_all(char *NXTaddr)//,char *servername,char *connect_id)
 {
     member_t *pm = member_list;
     while ( pm != 0 )
