@@ -63,7 +63,7 @@ struct NXTorrent_info
     char NXTADDR[32],NXTACCTSECRET[512];
     int32_t timestamp;
     struct hashtable *listings,*categories,*tags,*buyers,*sellers;
-    pthread_mutex_t category_mutex,tag_mutex,buyer_mutex,seller_mutex;
+    portable_mutex_t category_mutex,tag_mutex,buyer_mutex,seller_mutex;
 };
 struct NXTorrent_info *Global_NXTorrent;
 
@@ -158,7 +158,7 @@ double recalc_NXTorrent_feedback(struct hashtable **tablep,char *NXTaddr)
     return(calc_dpreds_ave(direct) + calc_dpreds_ave(indirect)/10. + calc_dpreds_ave(weighed)/3.);
 }
 
-struct feedback_info *update_NXTorrent_feedback(pthread_mutex_t *mutex,struct hashtable **tablep,char *NXTaddr,uint64_t other64bits,int32_t rating,int32_t timestamp)
+struct feedback_info *update_NXTorrent_feedback(portable_mutex_t *mutex,struct hashtable **tablep,char *NXTaddr,uint64_t other64bits,int32_t rating,int32_t timestamp)
 {
     struct feedback_info *fb;
     struct rawfeedback *raw;
@@ -168,14 +168,14 @@ struct feedback_info *update_NXTorrent_feedback(pthread_mutex_t *mutex,struct ha
     if ( NXTaddr == 0 || NXTaddr[0] == 0)
         return(0);
     fb = MTadd_hashtable(&createdflag,tablep,NXTaddr);
-    pthread_mutex_lock(mutex);
+    portable_mutex_lock(mutex);
     fb->raw = realloc(fb->raw,sizeof(*fb->raw) * (fb->numfeedbacks+1));
     raw = &fb->raw[fb->numfeedbacks];
     raw->other64bits = other64bits;
     raw->rawrating = rating;
     raw->timestamp = timestamp;
     fb->numfeedbacks++;
-    pthread_mutex_unlock(mutex);
+    portable_mutex_unlock(mutex);
     expand_nxt64bits(otherNXTaddr,other64bits);
     np = get_NXTacct(&createdflag,Global_mp,otherNXTaddr);
     update_dpreds(np->hisfeedbacks,rating);
@@ -187,7 +187,7 @@ struct feedback_info *update_NXTorrent_feedback(pthread_mutex_t *mutex,struct ha
     return(fb);
 }
 
-struct search_tag *add_search_tag(pthread_mutex_t *mutex,struct hashtable **tablep,char *key,struct NXTorrent_listing *lp)
+struct search_tag *add_search_tag(portable_mutex_t *mutex,struct hashtable **tablep,char *key,struct NXTorrent_listing *lp)
 {
     int32_t i;
     struct search_tag *tag;
@@ -195,7 +195,7 @@ struct search_tag *add_search_tag(pthread_mutex_t *mutex,struct hashtable **tabl
     if ( key == 0 || key[0] == 0)
         return(0);
     tag = MTadd_hashtable(&createdflag,tablep,key);
-    pthread_mutex_lock(mutex);
+    portable_mutex_lock(mutex);
     for (i=0; i<tag->numlps; i++)
         if ( tag->lps[i] == lp )
             break;
@@ -205,7 +205,7 @@ struct search_tag *add_search_tag(pthread_mutex_t *mutex,struct hashtable **tabl
         tag->lps[tag->numlps] = lp;
         tag->numlps++;
     } else printf("unexpected duplicate lp for key.(%s) i.%d\n",key,i);
-    pthread_mutex_unlock(mutex);
+    portable_mutex_unlock(mutex);
     return(tag);
 }
 
@@ -340,7 +340,8 @@ int32_t get_listing_status(char *listingid)
 
 int32_t cmp_NXTorrent_listings(struct NXTorrent_listing *ref,struct NXTorrent_listing *lp)
 {
-    char i,refbuf[4096],buf[4096];
+    int32_t i;
+    char refbuf[4096],buf[4096];
     if ( ref->seller64bits != lp->seller64bits )
         return(-1);
     if ( ref->buyer64bits != lp->buyer64bits )
@@ -639,7 +640,7 @@ char *list_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
         validsubatomic = isvalid_NXTsubatomic(0,0,&coinid,&amount,coinaddr_assetid,NXTsubatomic);
         if ( coinid == NXT_COINID )
             assetidbits = calc_nxt64bits(coinaddr_assetid), coinaddr_assetid[0] = 0;
-    }
+    } else validsubatomic = 0;
     //    static char *list[] = { (char *)list_func, "list", "", "NXT", "title", "price", "category1", "category2", "category3", "tag1", "tag2", "tag3", "URI", "description", "duration", 0 };
     if ( NXTaddr[0] != 0 && (price > 0 || validsubatomic != 0) )
     {
@@ -672,7 +673,7 @@ char *list_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
         expand_nxt64bits(listingid,hashval);
         safecopy(L.listingid,listingid,sizeof(L.listingid));
         L.listing64bits = calc_nxt64bits(L.listingid);
-       L.listedtime = issue_getTime();
+        L.listedtime = issue_getTime();
         printf("listedtime %d\n",(int)L.listedtime);
         L.expiration = (L.listedtime + L.duration);
 
@@ -928,6 +929,7 @@ char *makeoffer_func(char *sender,int32_t valid,cJSON **objs,int32_t numobjs)
     if ( listingid[0] != 0 )
         lp = get_listingid(listingid);
     assetidbits = 0;
+    validsubatomic = 0;
     if ( bid[0] != 0 )
     {
         replace_backslashquotes(bid);
@@ -1174,24 +1176,31 @@ void process_NXTorrent_typematch(struct NXTorrent_info *dp,struct NXT_protocol_p
 
 void *NXTorrent_handler(struct NXThandler_info *mp,struct NXT_protocol_parms *parms,void *handlerdata)
 {
+    static int64_t nexttime;
     struct feedback_info *fb = 0;
     struct search_tag *tag = 0;
     struct NXTorrent_info *gp = handlerdata;
     struct NXTorrent_listing *lp = 0;
     if ( Global_NXTorrent != 0 )
-        Global_NXTorrent->timestamp = issue_getTime();
+    {
+        if ( microseconds() < nexttime )
+        {
+            Global_NXTorrent->timestamp = issue_getTime();
+            nexttime += 1000000;
+        }
+    }
     if ( parms->txid == 0 )     // indicates non-transaction event
     {
         if ( parms->mode == NXTPROTOCOL_WEBJSON )
             return(NXTorrent_jsonhandler(parms->argjson));
         else if ( parms->mode == NXTPROTOCOL_NEWBLOCK )
         {
-            //printf("NXTorrent new RTblock %d time %ld microseconds %ld\n",mp->RTflag,time(0),(long)microseconds());
+            //printf("NXTorrent new RTblock %d time %I64d microseconds %ld\n",mp->RTflag,time(0),(long long)microseconds());
         }
         else if ( parms->mode == NXTPROTOCOL_IDLETIME )
         {
-            Global_NXTorrent->timestamp = issue_getTime();
-            //printf("NXTorrent new idletime %d time %ld microseconds %ld \n",mp->RTflag,time(0),(long)microseconds());
+            //Global_NXTorrent->timestamp = issue_getTime();
+            //printf("NXTorrent new idletime %d time %I64d microseconds %ld \n",mp->RTflag,time(0),(long long)microseconds());
         }
         else if ( parms->mode == NXTPROTOCOL_INIT )
         {
@@ -1204,6 +1213,10 @@ void *NXTorrent_handler(struct NXThandler_info *mp,struct NXT_protocol_parms *pa
             gp->sellers = hashtable_create("sellers",HASHTABLES_STARTSIZE,sizeof(*fb),((long)&fb->NXTaddr[0] - (long)fb),sizeof(fb->NXTaddr),((long)&fb->modified - (long)fb));
             gp->categories = hashtable_create("categories",HASHTABLES_STARTSIZE,sizeof(*tag),((long)&tag->key[0] - (long)tag),sizeof(tag->key),((long)&tag->modified - (long)tag));
             gp->tags = hashtable_create("tags",HASHTABLES_STARTSIZE,sizeof(*tag),((long)&tag->key[0] - (long)tag),sizeof(tag->key),((long)&tag->modified - (long)tag));
+            portable_mutex_init(&gp->category_mutex);
+            portable_mutex_init(&gp->tag_mutex);
+            portable_mutex_init(&gp->buyer_mutex);
+            portable_mutex_init(&gp->seller_mutex);
         }
         return(gp);
     }
