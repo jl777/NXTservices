@@ -165,7 +165,7 @@ int32_t server_request(int32_t *sdp,char *destserver,struct server_request_heade
     //printf("server requests variant.%d funcid.%d ind.%d argsize.%d retsize.%d\n",variant,funcid,ind,req->argsize,req->retsize);
     usleep(1000);
  	//static pthread_mutex_t mutex;
- 	//pthread_mutex_lock(&mutex);
+ 	//portable_mutex_lock(&mutex);
     if ( *sdp < 0 )
     {
         sprintf(servport,"%d",SERVER_PORT + variant);
@@ -196,7 +196,7 @@ int32_t server_request(int32_t *sdp,char *destserver,struct server_request_heade
             //if (rc == EAI_SYSTEM)
                 printf("getaddrinfo() failed\n");
             *sdp = -1;
-            //pthread_mutex_unlock(&mutex);
+            //portable_mutex_unlock(&mutex);
             return(-1);
         }
         *sdp = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
@@ -204,7 +204,7 @@ int32_t server_request(int32_t *sdp,char *destserver,struct server_request_heade
         {
             printf("socket() failed\n");
             *sdp = -1;
-            //pthread_mutex_unlock(&mutex);
+            //portable_mutex_unlock(&mutex);
             return(-1);
         }
         rc = connect(*sdp,res->ai_addr,res->ai_addrlen);
@@ -215,7 +215,7 @@ int32_t server_request(int32_t *sdp,char *destserver,struct server_request_heade
             close(*sdp);
             *sdp = -1;
             sleep(1);
-            //pthread_mutex_unlock(&mutex);
+            //portable_mutex_unlock(&mutex);
             return(-1);
         }
         //printf("connection to %s variant.%d port.(%s)\n",server,variant,servport);
@@ -228,7 +228,7 @@ int32_t server_request(int32_t *sdp,char *destserver,struct server_request_heade
         printf("send(%d) request failed\n",variant);
         close(*sdp);
         *sdp = -1;
-        //pthread_mutex_unlock(&mutex);
+        //portable_mutex_unlock(&mutex);
         return(-1);
     }
     //usleep(1);
@@ -243,7 +243,7 @@ int32_t server_request(int32_t *sdp,char *destserver,struct server_request_heade
    // printf("finished ind.%d retsize %d req->retsize.%d (variant.%d funcid.%d)\n",ind,retsize,req->retsize,variant,funcid);
     close(*sdp);
     *sdp = -1;
-    //pthread_mutex_unlock(&mutex);
+    //portable_mutex_unlock(&mutex);
     return(rc);
 }
 
